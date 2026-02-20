@@ -1,0 +1,416 @@
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0d1117;
+  --bg2:       #161b22;
+  --bg3:       #1c2230;
+  --border:    #30363d;
+  --accent:    #2196f3;
+  --accent2:   #0d47a1;
+  --text:      #e6edf3;
+  --text2:     #8b949e;
+  --success:   #3fb950;
+  --danger:    #f85149;
+  --origin:    #26a69a;
+  --dest:      #ef5350;
+  --sidebar-w: 320px;
+  --radius:    8px;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+#sidebar {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: var(--sidebar-w);
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 16px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+#map {
+  position: fixed;
+  top: 0; left: var(--sidebar-w); right: 0; bottom: 0;
+}
+
+/* ── Brand ───────────────────────────────────────────────────────────────── */
+#brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.brand-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--accent);
+}
+
+.brand-sub {
+  font-size: 11px;
+  color: var(--text2);
+  letter-spacing: .3px;
+}
+
+/* ── Waypoint block ──────────────────────────────────────────────────────── */
+.waypoint-block {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.waypoint-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text2);
+}
+
+.dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-origin { background: var(--origin); }
+.dot-dest   { background: var(--dest); }
+
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  gap: 4px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 5px 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.tab-btn:hover { border-color: var(--accent); color: var(--text); }
+
+.tab-btn.active {
+  background: var(--accent2);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Panes ───────────────────────────────────────────────────────────────── */
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* ── Inputs ──────────────────────────────────────────────────────────────── */
+.inp {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color .15s;
+}
+
+.inp:focus { border-color: var(--accent); }
+.inp::placeholder { color: var(--text2); }
+
+.coords-row {
+  display: flex;
+  gap: 6px;
+}
+
+.coords-inp { flex: 1; }
+
+/* ── Autocomplete dropdown ───────────────────────────────────────────────── */
+.autocomplete-wrap { position: relative; }
+
+.dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 2000;
+  display: none;
+}
+
+.dropdown.open { display: block; }
+
+.dropdown-item {
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background .1s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dropdown-item:last-child { border-bottom: none; }
+.dropdown-item:hover, .dropdown-item.focused { background: var(--bg3); }
+
+.di-locode {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--accent);
+  background: rgba(33,150,243,.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.di-info { flex: 1; min-width: 0; }
+.di-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.di-country { font-size: 11px; color: var(--text2); }
+
+/* ── Selected port chip ──────────────────────────────────────────────────── */
+.selected-port {
+  font-size: 12px;
+  color: var(--success);
+  min-height: 0;
+  transition: all .2s;
+}
+
+.selected-port:not(:empty) {
+  background: rgba(63,185,80,.08);
+  border: 1px solid rgba(63,185,80,.25);
+  border-radius: 5px;
+  padding: 5px 8px;
+}
+
+/* ── Speed selector ──────────────────────────────────────────────────────── */
+#speed-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.speed-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text2);
+}
+
+.speed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.speed-inp {
+  width: 72px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.speed-unit {
+  font-size: 12px;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+.speed-preset {
+  flex: 1;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ── Calculate button ────────────────────────────────────────────────────── */
+#calc-btn {
+  width: 100%;
+  padding: 11px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: .3px;
+  transition: background .15s, transform .1s;
+}
+
+#calc-btn:hover  { background: #1976d2; }
+#calc-btn:active { transform: scale(.98); }
+
+/* ── Error box ───────────────────────────────────────────────────────────── */
+#error-box {
+  background: rgba(248,81,73,.1);
+  border: 1px solid rgba(248,81,73,.4);
+  border-radius: var(--radius);
+  color: var(--danger);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+/* ── Loading ─────────────────────────────────────────────────────────────── */
+#loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text2);
+  font-size: 13px;
+}
+
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Stats panel ─────────────────────────────────────────────────────────── */
+#stats-panel {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.stats-route-label {
+  font-size: 12px;
+  color: var(--text2);
+  text-align: center;
+  font-weight: 500;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.stat-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+}
+
+.stat-card.wide {
+  grid-column: span 2;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+/* ── Utilities ───────────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
+/* ── Leaflet overrides ───────────────────────────────────────────────────── */
+.leaflet-container { background: #0a1929; }
+
+.leaflet-popup-content-wrapper {
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
+}
+
+.leaflet-popup-tip { background: var(--bg2); }
+
+/* ── Cursor position readout ─────────────────────────────────────────────── */
+#cursor-pos {
+  position: fixed;
+  bottom: 24px;
+  right: 12px;
+  background: rgba(13,17,23,.82);
+  color: var(--text2);
+  font-size: 11px;
+  font-family: monospace;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+  z-index: 1000;
+  letter-spacing: .3px;
+}
+
+/* ── Route hover tooltip ─────────────────────────────────────────────────── */
+.route-tooltip {
+  background: rgba(13,17,23,.92) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  color: var(--text) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 12px !important;
+  padding: 8px 11px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5) !important;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.route-tooltip::before { display: none !important; }
+
+.rt-row { display: flex; align-items: center; gap: 8px; line-height: 1.7; }
+.rt-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.rt-label { color: var(--text2); min-width: 72px; }
+.rt-val   { color: var(--accent); font-weight: 600; }
+.rt-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+/* Scrollbar styling */
+#sidebar::-webkit-scrollbar { width: 4px; }
+#sidebar::-webkit-scrollbar-track { background: transparent; }
+#sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }

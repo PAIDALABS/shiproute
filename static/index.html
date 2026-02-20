@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShipRoute</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- App CSS -->
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+  <aside id="sidebar">
+    <div id="brand">
+      <span class="brand-icon">⚓</span>
+      <div>
+        <div class="brand-title">ShipRoute</div>
+        <div class="brand-sub">Maritime Route Planner</div>
+      </div>
+    </div>
+
+    <!-- Origin -->
+    <div class="waypoint-block" id="origin-block">
+      <div class="waypoint-label">
+        <span class="dot dot-origin"></span>
+        Origin
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" data-wp="origin" data-tab="port">Port Search</button>
+        <button class="tab-btn" data-wp="origin" data-tab="coords">Coordinates</button>
+      </div>
+
+      <!-- Port search pane -->
+      <div class="tab-pane active" id="origin-port">
+        <div class="autocomplete-wrap">
+          <input class="inp" type="text" id="origin-search"
+                 placeholder="Port name or LOCODE…" autocomplete="off" />
+          <div class="dropdown" id="origin-dropdown"></div>
+        </div>
+        <div class="selected-port" id="origin-selected"></div>
+      </div>
+
+      <!-- Coordinates pane -->
+      <div class="tab-pane" id="origin-coords">
+        <div class="coords-row">
+          <input class="inp coords-inp" type="number" id="origin-lat"
+                 placeholder="Latitude" step="any" />
+          <input class="inp coords-inp" type="number" id="origin-lon"
+                 placeholder="Longitude" step="any" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Destination -->
+    <div class="waypoint-block" id="destination-block">
+      <div class="waypoint-label">
+        <span class="dot dot-dest"></span>
+        Destination
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" data-wp="destination" data-tab="port">Port Search</button>
+        <button class="tab-btn" data-wp="destination" data-tab="coords">Coordinates</button>
+      </div>
+
+      <!-- Port search pane -->
+      <div class="tab-pane active" id="destination-port">
+        <div class="autocomplete-wrap">
+          <input class="inp" type="text" id="destination-search"
+                 placeholder="Port name or LOCODE…" autocomplete="off" />
+          <div class="dropdown" id="destination-dropdown"></div>
+        </div>
+        <div class="selected-port" id="destination-selected"></div>
+      </div>
+
+      <!-- Coordinates pane -->
+      <div class="tab-pane" id="destination-coords">
+        <div class="coords-row">
+          <input class="inp coords-inp" type="number" id="destination-lat"
+                 placeholder="Latitude" step="any" />
+          <input class="inp coords-inp" type="number" id="destination-lon"
+                 placeholder="Longitude" step="any" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Speed selector -->
+    <div id="speed-block">
+      <label class="speed-label" for="speed-select">Vessel Speed</label>
+      <div class="speed-row">
+        <input class="inp speed-inp" type="number" id="speed-input"
+               value="14" min="1" max="50" step="0.5" />
+        <span class="speed-unit">knots</span>
+        <select class="inp speed-preset" id="speed-preset">
+          <option value="">Presets…</option>
+          <option value="10">Slow steam (10 kn)</option>
+          <option value="12">Eco steam (12 kn)</option>
+          <option value="14">Standard (14 kn)</option>
+          <option value="18">Fast cargo (18 kn)</option>
+          <option value="22">Container fast (22 kn)</option>
+          <option value="28">High-speed (28 kn)</option>
+        </select>
+      </div>
+    </div>
+
+    <button id="calc-btn">Calculate Route</button>
+
+    <!-- Error -->
+    <div id="error-box" class="hidden"></div>
+
+    <!-- Stats -->
+    <div id="stats-panel" class="hidden">
+      <div class="stats-route-label" id="stats-label"></div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-km">—</div>
+          <div class="stat-label">Kilometers</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-nmi">—</div>
+          <div class="stat-label">Nautical Miles</div>
+        </div>
+        <div class="stat-card wide">
+          <div class="stat-value" id="stat-time">—</div>
+          <div class="stat-label">Transit at 14 kn</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="loading" class="hidden">
+      <div class="spinner"></div>
+      Calculating route…
+    </div>
+  </aside>
+
+  <!-- ── Map ─────────────────────────────────────────────────────────────── -->
+  <div id="map"></div>
+  <div id="cursor-pos">—</div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- App JS -->
+  <script src="/static/app.js"></script>
+</body>
+</html>
