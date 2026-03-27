@@ -159,6 +159,9 @@ def classify_vessel_state(
 class CongestionEngine:
     """In-memory vessel tracker and port congestion scorer."""
 
+    # Max completed visits to keep per port (rolling window)
+    _MAX_VISIT_HISTORY = 500
+
     def __init__(self):
         # {locode: {mmsi: vessel_dict}}
         self._port_vessels: dict[str, dict[int, dict]] = {
@@ -166,6 +169,12 @@ class CongestionEngine:
         }
         # Reverse lookup: mmsi -> locode (a vessel can only be in one port)
         self._vessel_port: dict[int, str] = {}
+
+        # Completed port visits for turnaround analysis
+        # {locode: [visit_dict, ...]}
+        self._completed_visits: dict[str, list[dict]] = {
+            locode: [] for locode in MONITORED_PORTS
+        }
 
         # Stream health tracking
         self.stream_connected: bool = False
@@ -233,10 +242,21 @@ class CongestionEngine:
         # Get existing record (if any) for first_seen / state_since
         existing = self._port_vessels[target_locode].get(mmsi)
         first_seen = existing["first_seen"] if existing else now
-        # Reset state_since when state changes
+
+        # Accumulated state hours (carry forward from existing)
+        anchor_hours = existing["anchor_hours"] if existing else 0.0
+        berth_hours = existing["berth_hours"] if existing else 0.0
+
+        # Reset state_since when state changes; accumulate time in old state
         if existing and existing["state"] == state:
             state_since = existing["state_since"]
         else:
+            if existing:
+                elapsed = (now - existing["state_since"]) / 3600.0
+                if existing["state"] == "ANCHORED":
+                    anchor_hours += elapsed
+                elif existing["state"] == "BERTHED":
+                    berth_hours += elapsed
             state_since = now
 
         vessel_dict = {
@@ -254,10 +274,52 @@ class CongestionEngine:
             "first_seen": first_seen,
             "state_since": state_since,
             "last_seen": now,
+            "anchor_hours": anchor_hours,
+            "berth_hours": berth_hours,
         }
 
         self._port_vessels[target_locode][mmsi] = vessel_dict
         self._vessel_port[mmsi] = target_locode
+
+    # ------------------------------------------------------------------
+    # Departure recording
+    # ------------------------------------------------------------------
+
+    def _record_departure(self, locode: str, vessel: dict) -> None:
+        """Record a completed port visit for turnaround analysis."""
+        now = time.time()
+        # Add final state time
+        anchor_hours = vessel.get("anchor_hours", 0.0)
+        berth_hours = vessel.get("berth_hours", 0.0)
+        elapsed = (now - vessel["state_since"]) / 3600.0
+        if vessel["state"] == "ANCHORED":
+            anchor_hours += elapsed
+        elif vessel["state"] == "BERTHED":
+            berth_hours += elapsed
+
+        total_hours = (now - vessel["first_seen"]) / 3600.0
+
+        # Only record if vessel spent meaningful time (> 30 min)
+        if total_hours < 0.5:
+            return
+
+        visit = {
+            "mmsi": vessel["mmsi"],
+            "name": vessel.get("name"),
+            "ship_type": vessel.get("ship_type") or "Unknown",
+            "arrival_time": vessel["first_seen"],
+            "departure_time": now,
+            "total_hours": round(total_hours, 2),
+            "anchor_hours": round(anchor_hours, 2),
+            "berth_hours": round(berth_hours, 2),
+            "wait_hours": round(anchor_hours, 2),  # alias
+        }
+
+        history = self._completed_visits[locode]
+        history.append(visit)
+        # Trim to max size
+        if len(history) > self._MAX_VISIT_HISTORY:
+            self._completed_visits[locode] = history[-self._MAX_VISIT_HISTORY:]
 
     # ------------------------------------------------------------------
     # Pruning
@@ -266,7 +328,7 @@ class CongestionEngine:
     def prune_stale_vessels(self, max_age_seconds: int = 1800) -> int:
         """Remove vessels not seen for longer than *max_age_seconds*.
 
-        Returns the number of pruned vessels.
+        Records completed visits before removing. Returns the number pruned.
         """
         now = time.time()
         pruned = 0
@@ -277,6 +339,8 @@ class CongestionEngine:
                 if (now - v["last_seen"]) > max_age_seconds
             ]
             for mmsi in stale_mmsis:
+                vessel = self._port_vessels[locode][mmsi]
+                self._record_departure(locode, vessel)
                 del self._port_vessels[locode][mmsi]
                 self._vessel_port.pop(mmsi, None)
                 pruned += 1
@@ -416,6 +480,107 @@ class CongestionEngine:
             "lon": port["lon"],
             **metrics,
             "vessels": vessels_list,
+        }
+
+    def get_turnaround_stats(self, locode: str) -> Optional[dict]:
+        """Return turnaround time statistics grouped by vessel type.
+
+        Combines completed visits (historical) with currently berthed/anchored
+        vessels (in-progress) to give a full picture.
+        """
+        if locode not in MONITORED_PORTS:
+            return None
+
+        now = time.time()
+
+        # Combine completed visits + current vessels (as in-progress visits)
+        all_visits: list[dict] = []
+
+        # Completed visits from history
+        for v in self._completed_visits.get(locode, []):
+            all_visits.append({
+                "ship_type": v["ship_type"],
+                "total_hours": v["total_hours"],
+                "anchor_hours": v["anchor_hours"],
+                "berth_hours": v["berth_hours"],
+                "status": "completed",
+                "name": v.get("name"),
+                "mmsi": v["mmsi"],
+            })
+
+        # Current vessels (in-progress)
+        for v in self._port_vessels.get(locode, {}).values():
+            anchor_h = v.get("anchor_hours", 0.0)
+            berth_h = v.get("berth_hours", 0.0)
+            # Add current state elapsed time
+            elapsed = (now - v["state_since"]) / 3600.0
+            if v["state"] == "ANCHORED":
+                anchor_h += elapsed
+            elif v["state"] == "BERTHED":
+                berth_h += elapsed
+
+            total_h = (now - v["first_seen"]) / 3600.0
+
+            all_visits.append({
+                "ship_type": v.get("ship_type") or "Unknown",
+                "total_hours": round(total_h, 2),
+                "anchor_hours": round(anchor_h, 2),
+                "berth_hours": round(berth_h, 2),
+                "status": "in_port",
+                "state": v["state"],
+                "name": v.get("name"),
+                "mmsi": v["mmsi"],
+            })
+
+        # Group by vessel type
+        type_groups: dict[str, list[dict]] = {}
+        for visit in all_visits:
+            vtype = visit["ship_type"] or "Unknown"
+            type_groups.setdefault(vtype, []).append(visit)
+
+        # Compute stats per type
+        type_stats = []
+        for vtype, visits in sorted(type_groups.items(), key=lambda x: -len(x[1])):
+            n = len(visits)
+            total_hrs = [v["total_hours"] for v in visits]
+            anchor_hrs = [v["anchor_hours"] for v in visits]
+            berth_hrs = [v["berth_hours"] for v in visits]
+
+            type_stats.append({
+                "vessel_type": vtype,
+                "count": n,
+                "avg_total_hours": round(sum(total_hrs) / n, 1),
+                "avg_anchor_hours": round(sum(anchor_hrs) / n, 1),
+                "avg_berth_hours": round(sum(berth_hrs) / n, 1),
+                "max_total_hours": round(max(total_hrs), 1),
+                "max_anchor_hours": round(max(anchor_hrs), 1),
+                "min_total_hours": round(min(total_hrs), 1),
+            })
+
+        # Overall stats
+        if all_visits:
+            all_total = [v["total_hours"] for v in all_visits]
+            all_anchor = [v["anchor_hours"] for v in all_visits]
+            all_berth = [v["berth_hours"] for v in all_visits]
+            overall = {
+                "total_visits": len(all_visits),
+                "avg_turnaround_hours": round(sum(all_total) / len(all_total), 1),
+                "avg_wait_hours": round(sum(all_anchor) / len(all_anchor), 1),
+                "avg_berth_hours": round(sum(all_berth) / len(all_berth), 1),
+            }
+        else:
+            overall = {
+                "total_visits": 0,
+                "avg_turnaround_hours": 0,
+                "avg_wait_hours": 0,
+                "avg_berth_hours": 0,
+            }
+
+        return {
+            "locode": locode,
+            "name": MONITORED_PORTS[locode]["name"],
+            "overall": overall,
+            "by_vessel_type": type_stats,
         }
 
     def get_status(self) -> dict:

@@ -174,6 +174,15 @@ def get_live_port_detail(locode: str):
     return detail
 
 
+@app.get("/api/congestion/live/{locode}/turnaround")
+def get_live_turnaround(locode: str):
+    """Return turnaround time stats by vessel type for a port."""
+    stats = engine.get_turnaround_stats(locode.upper())
+    if not stats:
+        raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
+    return stats
+
+
 # ── Port Congestion v2 ────────────────────────────────────────────────────────
 #
 # NOTE: These routes MUST be registered before /api/congestion/{locode} so that

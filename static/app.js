@@ -1038,12 +1038,18 @@ async function openLivePortDetail(locode) {
   $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading live data…</div>';
 
   try {
-    const res = await fetch(`/api/congestion/live/${encodeURIComponent(locode)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const detail = await res.json();
+    const [detailRes, turnaroundRes] = await Promise.all([
+      fetch(`/api/congestion/live/${encodeURIComponent(locode)}`),
+      fetch(`/api/congestion/live/${encodeURIComponent(locode)}/turnaround`),
+    ]);
+
+    if (!detailRes.ok) throw new Error(`HTTP ${detailRes.status}`);
+    const detail = await detailRes.json();
+    const turnaround = turnaroundRes.ok ? await turnaroundRes.json() : null;
 
     renderLivePortDetail(detail);
     renderLiveVesselDots(detail.vessels || []);
+    renderTurnaroundStats(turnaround);
 
     if (detail.lat != null && detail.lon != null) {
       map.setView([detail.lat, detail.lon], 11, { animate: true });
@@ -1159,4 +1165,57 @@ function renderLiveVesselDots(vessels) {
 
     liveVesselMarkers.addLayer(marker);
   });
+}
+
+// ── Turnaround stats by vessel type ──────────────────────────────────────────
+function renderTurnaroundStats(data) {
+  const el = $('pd-turnaround');
+  if (!data || !data.by_vessel_type || data.by_vessel_type.length === 0) {
+    el.innerHTML = '<div class="vessel-empty">No turnaround data yet. Data accumulates as vessels are tracked.</div>';
+    return;
+  }
+
+  const o = data.overall;
+  const fmtH = h => h < 1 ? `${Math.round(h * 60)}m` : h < 24 ? `${h.toFixed(1)}h` : `${(h / 24).toFixed(1)}d`;
+
+  let html = `
+    <div class="turnaround-overall">
+      <div class="turnaround-stat">
+        <div class="turnaround-stat-val">${fmtH(o.avg_turnaround_hours)}</div>
+        <div class="turnaround-stat-label">Avg Turnaround</div>
+      </div>
+      <div class="turnaround-stat">
+        <div class="turnaround-stat-val">${fmtH(o.avg_wait_hours)}</div>
+        <div class="turnaround-stat-label">Avg Wait</div>
+      </div>
+      <div class="turnaround-stat">
+        <div class="turnaround-stat-val">${fmtH(o.avg_berth_hours)}</div>
+        <div class="turnaround-stat-label">Avg Berth</div>
+      </div>
+    </div>
+    <table class="turnaround-table">
+      <thead>
+        <tr>
+          <th>Vessel Type</th>
+          <th style="text-align:right">#</th>
+          <th style="text-align:right">Avg Turn</th>
+          <th style="text-align:right">Avg Wait</th>
+          <th style="text-align:right">Avg Berth</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+  data.by_vessel_type.forEach(t => {
+    html += `
+        <tr>
+          <td class="tt-type" title="${escHtml(t.vessel_type)}">${escHtml(t.vessel_type)}</td>
+          <td class="tt-num">${t.count}</td>
+          <td class="tt-num tt-highlight">${fmtH(t.avg_total_hours)}</td>
+          <td class="tt-num">${fmtH(t.avg_anchor_hours)}</td>
+          <td class="tt-num">${fmtH(t.avg_berth_hours)}</td>
+        </tr>`;
+  });
+
+  html += '</tbody></table>';
+  el.innerHTML = html;
 }
