@@ -12,132 +12,279 @@
 </head>
 <body>
 
+  <!-- ── Top Navigation Bar ───────────────────────────────────────────────── -->
+  <nav id="top-nav">
+    <div id="nav-brand">
+      <span class="brand-icon">⚓</span>
+      <span class="nav-brand-title">ShipRoute</span>
+    </div>
+    <div id="mode-toggle">
+      <button class="mode-btn active" id="btn-route-mode" onclick="switchMode('route')">
+        Route Planner
+      </button>
+      <button class="mode-btn" id="btn-congestion-mode" onclick="switchMode('congestion')">
+        Port Congestion
+      </button>
+      <button class="mode-btn" id="btn-live-mode" onclick="switchMode('live')">
+        Live Congestion
+      </button>
+    </div>
+  </nav>
+
   <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
   <aside id="sidebar">
-    <div id="brand">
-      <span class="brand-icon">⚓</span>
-      <div>
-        <div class="brand-title">ShipRoute</div>
-        <div class="brand-sub">Maritime Route Planner</div>
-      </div>
-    </div>
 
-    <!-- Origin -->
-    <div class="waypoint-block" id="origin-block">
-      <div class="waypoint-label">
-        <span class="dot dot-origin"></span>
-        Origin
-      </div>
-      <div class="tab-bar">
-        <button class="tab-btn active" data-wp="origin" data-tab="port">Port Search</button>
-        <button class="tab-btn" data-wp="origin" data-tab="coords">Coordinates</button>
-      </div>
-
-      <!-- Port search pane -->
-      <div class="tab-pane active" id="origin-port">
-        <div class="autocomplete-wrap">
-          <input class="inp" type="text" id="origin-search"
-                 placeholder="Port name or LOCODE…" autocomplete="off" />
-          <div class="dropdown" id="origin-dropdown"></div>
-        </div>
-        <div class="selected-port" id="origin-selected"></div>
-      </div>
-
-      <!-- Coordinates pane -->
-      <div class="tab-pane" id="origin-coords">
-        <div class="coords-row">
-          <input class="inp coords-inp" type="number" id="origin-lat"
-                 placeholder="Latitude" step="any" />
-          <input class="inp coords-inp" type="number" id="origin-lon"
-                 placeholder="Longitude" step="any" />
+    <!-- ── Route Mode Content ──────────────────────────────────────────── -->
+    <div id="route-mode">
+      <div id="brand">
+        <div>
+          <div class="brand-title">Route Planner</div>
+          <div class="brand-sub">Sea route calculator</div>
         </div>
       </div>
-    </div>
 
-    <!-- Destination -->
-    <div class="waypoint-block" id="destination-block">
-      <div class="waypoint-label">
-        <span class="dot dot-dest"></span>
-        Destination
-      </div>
-      <div class="tab-bar">
-        <button class="tab-btn active" data-wp="destination" data-tab="port">Port Search</button>
-        <button class="tab-btn" data-wp="destination" data-tab="coords">Coordinates</button>
-      </div>
-
-      <!-- Port search pane -->
-      <div class="tab-pane active" id="destination-port">
-        <div class="autocomplete-wrap">
-          <input class="inp" type="text" id="destination-search"
-                 placeholder="Port name or LOCODE…" autocomplete="off" />
-          <div class="dropdown" id="destination-dropdown"></div>
+      <!-- Origin -->
+      <div class="waypoint-block" id="origin-block">
+        <div class="waypoint-label">
+          <span class="dot dot-origin"></span>
+          Origin
         </div>
-        <div class="selected-port" id="destination-selected"></div>
-      </div>
-
-      <!-- Coordinates pane -->
-      <div class="tab-pane" id="destination-coords">
-        <div class="coords-row">
-          <input class="inp coords-inp" type="number" id="destination-lat"
-                 placeholder="Latitude" step="any" />
-          <input class="inp coords-inp" type="number" id="destination-lon"
-                 placeholder="Longitude" step="any" />
+        <div class="tab-bar">
+          <button class="tab-btn active" data-wp="origin" data-tab="port">Port Search</button>
+          <button class="tab-btn" data-wp="origin" data-tab="coords">Coordinates</button>
         </div>
-      </div>
-    </div>
 
-    <!-- Speed selector -->
-    <div id="speed-block">
-      <label class="speed-label" for="speed-select">Vessel Speed</label>
-      <div class="speed-row">
-        <input class="inp speed-inp" type="number" id="speed-input"
-               value="14" min="1" max="50" step="0.5" />
-        <span class="speed-unit">knots</span>
-        <select class="inp speed-preset" id="speed-preset">
-          <option value="">Presets…</option>
-          <option value="10">Slow steam (10 kn)</option>
-          <option value="12">Eco steam (12 kn)</option>
-          <option value="14">Standard (14 kn)</option>
-          <option value="18">Fast cargo (18 kn)</option>
-          <option value="22">Container fast (22 kn)</option>
-          <option value="28">High-speed (28 kn)</option>
-        </select>
-      </div>
-    </div>
-
-    <button id="calc-btn">Calculate Route</button>
-
-    <!-- Error -->
-    <div id="error-box" class="hidden"></div>
-
-    <!-- Stats -->
-    <div id="stats-panel" class="hidden">
-      <div class="stats-route-label" id="stats-label"></div>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" id="stat-km">—</div>
-          <div class="stat-label">Kilometers</div>
+        <!-- Port search pane -->
+        <div class="tab-pane active" id="origin-port">
+          <div class="autocomplete-wrap">
+            <input class="inp" type="text" id="origin-search"
+                   placeholder="Port name or LOCODE…" autocomplete="off" />
+            <div class="dropdown" id="origin-dropdown"></div>
+          </div>
+          <div class="selected-port" id="origin-selected"></div>
         </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-nmi">—</div>
-          <div class="stat-label">Nautical Miles</div>
-        </div>
-        <div class="stat-card wide">
-          <div class="stat-value" id="stat-time">—</div>
-          <div class="stat-label">Transit at 14 kn</div>
+
+        <!-- Coordinates pane -->
+        <div class="tab-pane" id="origin-coords">
+          <div class="coords-row">
+            <input class="inp coords-inp" type="number" id="origin-lat"
+                   placeholder="Latitude" step="any" />
+            <input class="inp coords-inp" type="number" id="origin-lon"
+                   placeholder="Longitude" step="any" />
+          </div>
         </div>
       </div>
-    </div>
 
-    <div id="loading" class="hidden">
-      <div class="spinner"></div>
-      Calculating route…
-    </div>
+      <!-- Destination -->
+      <div class="waypoint-block" id="destination-block">
+        <div class="waypoint-label">
+          <span class="dot dot-dest"></span>
+          Destination
+        </div>
+        <div class="tab-bar">
+          <button class="tab-btn active" data-wp="destination" data-tab="port">Port Search</button>
+          <button class="tab-btn" data-wp="destination" data-tab="coords">Coordinates</button>
+        </div>
+
+        <!-- Port search pane -->
+        <div class="tab-pane active" id="destination-port">
+          <div class="autocomplete-wrap">
+            <input class="inp" type="text" id="destination-search"
+                   placeholder="Port name or LOCODE…" autocomplete="off" />
+            <div class="dropdown" id="destination-dropdown"></div>
+          </div>
+          <div class="selected-port" id="destination-selected"></div>
+        </div>
+
+        <!-- Coordinates pane -->
+        <div class="tab-pane" id="destination-coords">
+          <div class="coords-row">
+            <input class="inp coords-inp" type="number" id="destination-lat"
+                   placeholder="Latitude" step="any" />
+            <input class="inp coords-inp" type="number" id="destination-lon"
+                   placeholder="Longitude" step="any" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Speed selector -->
+      <div id="speed-block">
+        <label class="speed-label" for="speed-select">Vessel Speed</label>
+        <div class="speed-row">
+          <input class="inp speed-inp" type="number" id="speed-input"
+                 value="14" min="1" max="50" step="0.5" />
+          <span class="speed-unit">knots</span>
+          <select class="inp speed-preset" id="speed-preset">
+            <option value="">Presets…</option>
+            <option value="10">Slow steam (10 kn)</option>
+            <option value="12">Eco steam (12 kn)</option>
+            <option value="14">Standard (14 kn)</option>
+            <option value="18">Fast cargo (18 kn)</option>
+            <option value="22">Container fast (22 kn)</option>
+            <option value="28">High-speed (28 kn)</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="calc-btn">Calculate Route</button>
+
+      <!-- Error -->
+      <div id="error-box" class="hidden"></div>
+
+      <!-- Stats -->
+      <div id="stats-panel" class="hidden">
+        <div class="stats-route-label" id="stats-label"></div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-km">—</div>
+            <div class="stat-label">Kilometers</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-nmi">—</div>
+            <div class="stat-label">Nautical Miles</div>
+          </div>
+          <div class="stat-card wide">
+            <div class="stat-value" id="stat-time">—</div>
+            <div class="stat-label">Transit at 14 kn</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="loading" class="hidden">
+        <div class="spinner"></div>
+        Calculating route…
+      </div>
+    </div><!-- /#route-mode -->
+
+    <!-- ── Congestion Mode Content ────────────────────────────────────── -->
+    <div id="congestion-mode" class="hidden">
+      <div id="congestion-header">
+        <div class="brand-title">Port Congestion</div>
+        <div class="brand-sub">Real-time anchor queue analysis</div>
+      </div>
+
+      <!-- Filter / sort row -->
+      <div id="congestion-controls">
+        <div class="congestion-sort-label">Sort by</div>
+        <div class="sort-btn-group">
+          <button class="sort-btn active" data-sort="score">Score</button>
+          <button class="sort-btn" data-sort="wait">Avg Wait</button>
+          <button class="sort-btn" data-sort="queue">Queue Depth</button>
+        </div>
+        <div id="congestion-loading" class="hidden">
+          <div class="spinner spinner-sm"></div>
+          <span>Loading…</span>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div id="congestion-legend">
+        <span class="legend-item"><span class="legend-dot severity-severe"></span>Severe</span>
+        <span class="legend-item"><span class="legend-dot severity-high"></span>High</span>
+        <span class="legend-item"><span class="legend-dot severity-moderate"></span>Moderate</span>
+        <span class="legend-item"><span class="legend-dot severity-low"></span>Low</span>
+      </div>
+
+      <!-- Port list -->
+      <div id="port-list"></div>
+    </div><!-- /#congestion-mode -->
+
+    <!-- ── Live Congestion Mode Content ─────────────────────────────────── -->
+    <div id="live-mode" class="hidden">
+      <div id="live-header">
+        <div class="brand-title">Live Congestion</div>
+        <div class="brand-sub">Real-time AIS vessel tracking</div>
+      </div>
+
+      <!-- Stream status -->
+      <div id="live-status-bar">
+        <span id="live-status-dot" class="live-dot"></span>
+        <span id="live-status-text">Connecting...</span>
+        <span id="live-last-update" class="live-last-update"></span>
+      </div>
+
+      <!-- Legend -->
+      <div id="congestion-legend-live">
+        <span class="legend-item"><span class="legend-dot severity-severe"></span>Severe</span>
+        <span class="legend-item"><span class="legend-dot severity-high"></span>High</span>
+        <span class="legend-item"><span class="legend-dot severity-moderate"></span>Moderate</span>
+        <span class="legend-item"><span class="legend-dot severity-low"></span>Low</span>
+      </div>
+
+      <!-- Live port list -->
+      <div id="live-port-list"></div>
+    </div><!-- /#live-mode -->
+
   </aside>
 
   <!-- ── Map ─────────────────────────────────────────────────────────────── -->
   <div id="map"></div>
   <div id="cursor-pos">—</div>
+
+  <!-- ── Port Detail Panel (slides in from right) ─────────────────────── -->
+  <div id="port-detail" class="hidden">
+    <div class="port-detail-header">
+      <div class="port-detail-title-group">
+        <div id="pd-port-name" class="pd-port-name"></div>
+        <div id="pd-port-meta" class="pd-port-meta"></div>
+      </div>
+      <button id="pd-close-btn" class="pd-close-btn" onclick="closePortDetail()">✕</button>
+    </div>
+
+    <!-- Score ring + level -->
+    <div class="pd-score-row">
+      <div class="pd-score-ring-wrap">
+        <svg class="pd-score-ring" viewBox="0 0 80 80">
+          <circle class="ring-track" cx="40" cy="40" r="32" />
+          <circle class="ring-fill" id="pd-ring-fill" cx="40" cy="40" r="32"
+                  stroke-dasharray="201 201" stroke-dashoffset="201" />
+        </svg>
+        <div class="pd-score-center">
+          <div id="pd-score-val" class="pd-score-val">—</div>
+          <div class="pd-score-sub">/ 100</div>
+        </div>
+      </div>
+      <div class="pd-level-group">
+        <div id="pd-level-badge" class="pd-level-badge">—</div>
+        <div class="pd-level-label">Congestion Level</div>
+      </div>
+    </div>
+
+    <!-- Metrics grid -->
+    <div class="pd-metrics-grid">
+      <div class="pd-metric-card">
+        <div id="pd-peak-anchored" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Peak Queue</div>
+      </div>
+      <div class="pd-metric-card">
+        <div id="pd-avg-wait" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Avg Wait</div>
+      </div>
+      <div class="pd-metric-card">
+        <div id="pd-peak-berthed" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Peak Berthed</div>
+      </div>
+      <div class="pd-metric-card">
+        <div id="pd-transitioned" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Transitioned</div>
+      </div>
+    </div>
+
+    <!-- Timeline chart -->
+    <div class="pd-section-title">Anchor Queue Over Time</div>
+    <div class="timeline-chart" id="pd-timeline-chart">
+      <div class="timeline-loading">Loading chart…</div>
+    </div>
+
+    <!-- State breakdown bars -->
+    <div class="pd-section-title">State Breakdown</div>
+    <div id="pd-state-breakdown" class="pd-state-breakdown"></div>
+
+    <!-- Vessel list -->
+    <div class="pd-section-title">Vessels in Port Zone</div>
+    <div id="pd-vessel-list" class="vessel-list"></div>
+
+  </div><!-- /#port-detail -->
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
