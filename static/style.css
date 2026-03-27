@@ -482,86 +482,36 @@ html, body {
   top: 48px;
 }
 
-/* ── Route/Congestion mode containers ────────────────────────────────────── */
-#route-mode {
+/* ── Mode containers ─────────────────────────────────────────────────────── */
+#voyage-mode {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-#congestion-mode {
+#portwatch-mode {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-/* ── Congestion sidebar header ───────────────────────────────────────────── */
-#congestion-header {
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-/* ── Congestion controls ─────────────────────────────────────────────────── */
-#congestion-controls {
+#finder-mode {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.congestion-sort-label {
-  font-size: 11px;
-  color: var(--text2);
-  text-transform: uppercase;
-  letter-spacing: .4px;
-  flex-shrink: 0;
-}
-
-.sort-btn-group {
+#weather-mode,
+#market-mode {
   display: flex;
-  gap: 3px;
-  flex: 1;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.sort-btn {
-  flex: 1;
-  padding: 4px 6px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text2);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all .15s;
-  white-space: nowrap;
-}
-
-.sort-btn:hover { border-color: var(--accent); color: var(--text); }
-
-.sort-btn.active {
-  background: var(--accent2);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-#congestion-loading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text2);
-  font-size: 12px;
-}
-
+/* ── Congestion controls (retained for potential reuse) ───────────────────── */
 .spinner-sm {
   width: 14px; height: 14px;
   border-width: 2px;
-}
-
-/* ── Congestion legend ───────────────────────────────────────────────────── */
-#congestion-legend {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 
 .legend-item {
@@ -1030,17 +980,7 @@ html, body {
 
 .port-tooltip::before { display: none !important; }
 
-/* ── Live Congestion Mode ───────────────────────────────────────────────── */
-#live-mode {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-#live-header {
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-}
+/* ── Live Congestion (within Port Watch) ─────────────────────────────────── */
 
 /* ── Stream status bar ──────────────────────────────────────────────────── */
 #live-status-bar {
@@ -1120,18 +1060,7 @@ html, body {
   animation: port-pulse 2s ease-in-out infinite;
 }
 
-/* ── Cargo Flow Mode ─────────────────────────────────────────────────────── */
-#flow-mode {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-#flow-header {
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-}
-
+/* ── Cargo Flow (retained styles) ────────────────────────────────────────── */
 #flow-content {
   display: flex;
   flex-direction: column;
@@ -1487,4 +1416,258 @@ html, body {
   text-transform: uppercase;
   letter-spacing: .3px;
   margin-top: 2px;
+}
+
+/* ── Secondary button (Add Stop, etc.) ──────────────────────────────────── */
+.btn-secondary {
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text2);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(33,150,243,.06);
+}
+
+/* ── Waypoint remove button ─────────────────────────────────────────────── */
+.wp-remove-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text2);
+  font-size: 14px;
+  width: 22px; height: 22px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+  transition: all .15s;
+}
+
+.wp-remove-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ── Fuel block ─────────────────────────────────────────────────────────── */
+#fuel-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Voyage Results ─────────────────────────────────────────────────────── */
+#voyage-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#voyage-summary {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Voyage Leg Card ────────────────────────────────────────────────────── */
+.voyage-leg {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voyage-leg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voyage-leg-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(33,150,243,.12);
+  padding: 2px 7px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.voyage-leg-route {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voyage-leg-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+/* ── Voyage Fuel Card ───────────────────────────────────────────────────── */
+.voyage-fuel-card {
+  background: var(--bg3);
+  border: 1px solid rgba(255,152,0,.3);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.voyage-fuel-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: #ff9800;
+}
+
+.voyage-fuel-detail {
+  font-size: 11px;
+  color: var(--text2);
+  text-align: center;
+}
+
+/* ── Finder Results ─────────────────────────────────────────────────────── */
+#finder-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: calc(100vh - 440px);
+}
+
+#finder-results::-webkit-scrollbar { width: 4px; }
+#finder-results::-webkit-scrollbar-track { background: transparent; }
+#finder-results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+#finder-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Finder Vessel Card ─────────────────────────────────────────────────── */
+.finder-vessel {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.finder-vessel:hover {
+  border-color: var(--accent);
+  background: #1c2840;
+}
+
+.finder-vessel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.finder-vessel-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text2);
+  flex-wrap: wrap;
+}
+
+.finder-vessel-reasons {
+  font-size: 10px;
+  color: var(--text2);
+}
+
+/* ── Availability Badge ─────────────────────────────────────────────────── */
+.avail-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.avail-badge.avail-high {
+  background: rgba(76,175,80,.12);
+  color: #4caf50;
+  border-color: rgba(76,175,80,.35);
+}
+
+.avail-badge.avail-med {
+  background: rgba(255,152,0,.12);
+  color: #ff9800;
+  border-color: rgba(255,152,0,.35);
+}
+
+.avail-badge.avail-low {
+  background: rgba(139,148,158,.12);
+  color: #8b949e;
+  border-color: rgba(139,148,158,.35);
+}
+
+/* ── Africa Trade Badge ─────────────────────────────────────────────────── */
+.africa-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255,152,0,.15);
+  color: #ff9800;
+  border: 1px solid rgba(255,152,0,.35);
+  white-space: nowrap;
+}
+
+/* ── Finder search button ───────────────────────────────────────────────── */
+#finder-search-btn {
+  width: 100%;
+  padding: 10px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+}
+
+#finder-search-btn:hover { background: #1976d2; }
+#finder-search-btn:active { transform: scale(.98); }
+
+#finder-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text2);
+  font-size: 13px;
 }

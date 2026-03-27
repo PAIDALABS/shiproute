@@ -5,18 +5,24 @@ const map = L.map('map', { zoomControl: true }).setView([20, 0], 2);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
-  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
 }).addTo(map);
 
 // ── State ──────────────────────────────────────────────────────────────────
-const state = {
-  origin:      { mode: 'port', point: null },   // point: {name, lat, lon}
-  destination: { mode: 'port', point: null },
-};
-
 let routeLayer    = null;
 let markersLayer  = null;
 let lastRouteData = null;
+
+// Waypoints for multi-leg voyage
+let waypoints = [
+  { point: null },  // Port 1
+  { point: null },  // Port 2
+];
+
+// Finder state
+let finderPort   = null;
+let finderMarkers = L.featureGroup();
+let finderTrackLayer = null;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -24,12 +30,7 @@ const $ = id => document.getElementById(id);
 const ui = {
   calcBtn:      $('calc-btn'),
   errorBox:     $('error-box'),
-  statsPanel:   $('stats-panel'),
   loading:      $('loading'),
-  statKm:       $('stat-km'),
-  statNmi:      $('stat-nmi'),
-  statTime:     $('stat-time'),
-  statsLabel:   $('stats-label'),
   speedInput:   $('speed-input'),
   speedPreset:  $('speed-preset'),
 };
@@ -40,50 +41,26 @@ function getSpeed() {
   return (isNaN(v) || v <= 0) ? 14 : v;
 }
 
-function updateTransitStat() {
-  if (!ui.statsPanel.classList.contains('hidden') && lastRouteData) {
-    const spd = getSpeed();
-    ui.statTime.textContent = formatDuration(lastRouteData.distance_nmi / spd);
-    document.querySelector('#stats-panel .stat-card.wide .stat-label').textContent =
-      `Transit at ${spd} kn`;
-  }
-}
-
 ui.speedPreset.addEventListener('change', () => {
   if (ui.speedPreset.value) {
     ui.speedInput.value = ui.speedPreset.value;
     ui.speedPreset.value = '';
-    updateTransitStat();
   }
 });
 
-ui.speedInput.addEventListener('input', updateTransitStat);
-
-// ── Tab switching ──────────────────────────────────────────────────────────
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const wp  = btn.dataset.wp;   // 'origin' | 'destination'
-    const tab = btn.dataset.tab;  // 'port'   | 'coords'
-
-    // Update button active state
-    document.querySelectorAll(`.tab-btn[data-wp="${wp}"]`).forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-
-    // Show correct pane
-    $(`${wp}-port`  ).classList.toggle('active', tab === 'port');
-    $(`${wp}-coords`).classList.toggle('active', tab === 'coords');
-
-    state[wp].mode  = tab;
-    state[wp].point = null;
-    $(`${wp}-selected`).textContent = '';
+// Fuel preset
+const fuelPreset = $('fuel-preset');
+if (fuelPreset) {
+  fuelPreset.addEventListener('change', () => {
+    if (fuelPreset.value) {
+      $('fuel-consumption').value = fuelPreset.value;
+      fuelPreset.value = '';
+    }
   });
-});
+}
 
-// ── Autocomplete ───────────────────────────────────────────────────────────
-function setupAutocomplete(wp) {
-  const input    = $(`${wp}-search`);
-  const dropdown = $(`${wp}-dropdown`);
-  const selected = $(`${wp}-selected`);
+// ── Waypoint Autocomplete (Voyage Mode) ───────────────────────────────────
+function setupWaypointAutocomplete(input, dropdown, wpIndex) {
   let debounceTimer = null;
   let focusedIdx    = -1;
   let items         = [];
@@ -92,11 +69,7 @@ function setupAutocomplete(wp) {
     items = results;
     focusedIdx = -1;
     dropdown.innerHTML = '';
-
-    if (!results.length) {
-      dropdown.classList.remove('open');
-      return;
-    }
+    if (!results.length) { dropdown.classList.remove('open'); return; }
 
     results.forEach((port, i) => {
       const div = document.createElement('div');
@@ -107,20 +80,13 @@ function setupAutocomplete(wp) {
           <div class="di-name">${port.name}</div>
           <div class="di-country">${port.country}</div>
         </div>`;
-      div.addEventListener('mousedown', e => {
-        e.preventDefault();
-        selectPort(port);
-      });
+      div.addEventListener('mousedown', e => { e.preventDefault(); selectPort(port); });
       dropdown.appendChild(div);
     });
-
     dropdown.classList.add('open');
   }
 
-  function closeDropdown() {
-    dropdown.classList.remove('open');
-    focusedIdx = -1;
-  }
+  function closeDropdown() { dropdown.classList.remove('open'); focusedIdx = -1; }
 
   function setFocus(idx) {
     const divs = dropdown.querySelectorAll('.dropdown-item');
@@ -133,62 +99,123 @@ function setupAutocomplete(wp) {
   }
 
   function selectPort(port) {
-    state[wp].point = { name: port.name, lat: port.lat, lon: port.lon };
-    input.value     = `${port.name} (${port.locode})`;
-    selected.textContent = `✓ ${port.lat.toFixed(3)}, ${port.lon.toFixed(3)}`;
+    waypoints[wpIndex] = { point: { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode } };
+    input.value = `${port.name} (${port.locode})`;
     closeDropdown();
   }
 
-  // Debounced search
   input.addEventListener('input', () => {
     clearTimeout(debounceTimer);
-    state[wp].point = null;
-    selected.textContent = '';
+    waypoints[wpIndex] = { point: null };
     const q = input.value.trim();
     if (!q) { closeDropdown(); return; }
     debounceTimer = setTimeout(async () => {
       try {
-        const res     = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=10`);
+        const res = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=10`);
         const results = await res.json();
         openDropdown(results);
       } catch { /* ignore */ }
     }, 300);
   });
 
-  // Keyboard nav
   input.addEventListener('keydown', e => {
     if (!dropdown.classList.contains('open')) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setFocus(Math.min(focusedIdx + 1, items.length - 1)); }
     if (e.key === 'ArrowUp')   { e.preventDefault(); setFocus(Math.max(focusedIdx - 1, 0)); }
-    if (e.key === 'Enter')     { if (focusedIdx >= 0) { selectPort(items[focusedIdx]); } }
+    if (e.key === 'Enter')     { if (focusedIdx >= 0) selectPort(items[focusedIdx]); }
     if (e.key === 'Escape')    { closeDropdown(); }
   });
 
-  // Click outside
   document.addEventListener('click', e => {
-    if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-      closeDropdown();
-    }
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) closeDropdown();
   });
 }
 
-setupAutocomplete('origin');
-setupAutocomplete('destination');
+// Initialize waypoint autocompletes for the initial 2 waypoints
+function initWaypointAutocompletes() {
+  document.querySelectorAll('#waypoints-container .wp-search').forEach(input => {
+    const idx = parseInt(input.dataset.idx, 10);
+    const dropdown = input.parentElement.querySelector('.wp-dropdown');
+    setupWaypointAutocomplete(input, dropdown, idx);
+  });
+}
+initWaypointAutocompletes();
 
-// ── Resolve input to point ─────────────────────────────────────────────────
-function resolvePoint(wp) {
-  const s = state[wp];
-  if (s.mode === 'port') {
-    if (!s.point) throw new Error(`Select a port for ${wp}`);
-    return { lat: s.point.lat, lon: s.point.lon };
-  }
-  // coords mode
-  const lat = parseFloat($(`${wp}-lat`).value);
-  const lon = parseFloat($(`${wp}-lon`).value);
-  if (isNaN(lat) || isNaN(lon)) throw new Error(`Enter valid coordinates for ${wp}`);
-  if (lat < -90 || lat > 90)    throw new Error(`${wp} latitude must be between -90 and 90`);
-  if (lon < -180 || lon > 180)  throw new Error(`${wp} longitude must be between -180 and 180`);
-  return { lat, lon };
+// ── Add Waypoint ──────────────────────────────────────────────────────────
+$('add-wp-btn').addEventListener('click', () => {
+  const idx = waypoints.length;
+  waypoints.push({ point: null });
+
+  const container = $('waypoints-container');
+  const block = document.createElement('div');
+  block.className = 'waypoint-block';
+  block.dataset.wpIdx = idx;
+
+  const dotClass = idx === 0 ? 'dot-origin' : 'dot-dest';
+  block.innerHTML = `
+    <div class="waypoint-label">
+      <span class="dot ${dotClass}"></span> Port ${idx + 1}
+      <button class="wp-remove-btn" data-remove-idx="${idx}" title="Remove stop">&times;</button>
+    </div>
+    <div class="autocomplete-wrap">
+      <input class="inp wp-search" type="text" placeholder="Search port..." autocomplete="off" data-idx="${idx}" />
+      <div class="dropdown wp-dropdown"></div>
+    </div>`;
+  container.appendChild(block);
+
+  const newInput = block.querySelector('.wp-search');
+  const newDropdown = block.querySelector('.wp-dropdown');
+  setupWaypointAutocomplete(newInput, newDropdown, idx);
+
+  block.querySelector('.wp-remove-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    removeWaypoint(idx);
+  });
+});
+
+function removeWaypoint(idx) {
+  if (waypoints.length <= 2) return; // need at least 2
+  waypoints.splice(idx, 1);
+  rebuildWaypointUI();
+}
+
+function rebuildWaypointUI() {
+  const container = $('waypoints-container');
+  container.innerHTML = '';
+
+  waypoints.forEach((wp, i) => {
+    const block = document.createElement('div');
+    block.className = 'waypoint-block';
+    block.dataset.wpIdx = i;
+
+    const dotClass = i === 0 ? 'dot-origin' : 'dot-dest';
+    const removable = waypoints.length > 2;
+    block.innerHTML = `
+      <div class="waypoint-label">
+        <span class="dot ${dotClass}"></span> Port ${i + 1}
+        ${removable ? `<button class="wp-remove-btn" data-remove-idx="${i}" title="Remove stop">&times;</button>` : ''}
+      </div>
+      <div class="autocomplete-wrap">
+        <input class="inp wp-search" type="text" placeholder="Search port..." autocomplete="off" data-idx="${i}" />
+        <div class="dropdown wp-dropdown"></div>
+      </div>`;
+    container.appendChild(block);
+
+    const input = block.querySelector('.wp-search');
+    const dropdown = block.querySelector('.wp-dropdown');
+
+    if (wp.point) {
+      input.value = `${wp.point.name} (${wp.point.locode || ''})`;
+    }
+    setupWaypointAutocomplete(input, dropdown, i);
+
+    if (removable) {
+      block.querySelector('.wp-remove-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeWaypoint(i);
+      });
+    }
+  });
 }
 
 // ── Geo math ───────────────────────────────────────────────────────────────
@@ -203,9 +230,7 @@ function haversineNmi(lat1, lon1, lat2, lon2) {
   return EARTH_NMI * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Build parallel arrays: cumDist[i] = nmi from start to vertex i
 function buildCumDist(coords) {
-  // coords = [[lon,lat], ...]
   const cum = [0];
   for (let i = 1; i < coords.length; i++) {
     const [lon1, lat1] = coords[i - 1];
@@ -215,7 +240,6 @@ function buildCumDist(coords) {
   return cum;
 }
 
-// Return nmi from route start to closest point on route to `latlng`
 function distAlongRoute(latlng, coords, cumDist) {
   let bestDist = Infinity, bestNmi = 0;
   for (let i = 0; i < coords.length - 1; i++) {
@@ -245,40 +269,37 @@ function formatDuration(hours) {
   return `${d}d ${h}h`;
 }
 
-// ── Calculate route ────────────────────────────────────────────────────────
+// ── Calculate Voyage (multi-leg) ──────────────────────────────────────────
 ui.calcBtn.addEventListener('click', async () => {
   hideError();
-  hideStats();
+  $('voyage-results').classList.add('hidden');
 
-  let origin, destination;
-  try {
-    origin      = resolvePoint('origin');
-    destination = resolvePoint('destination');
-  } catch (err) {
-    showError(err.message);
-    return;
+  // Validate waypoints
+  const resolved = [];
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    if (!wp.point) {
+      showError(`Select a port for Port ${i + 1}`);
+      return;
+    }
+    resolved.push({ lat: wp.point.lat, lon: wp.point.lon, name: wp.point.name });
   }
 
   showLoading(true);
 
   try {
-    const res = await fetch('/api/route', {
+    const speed = getSpeed();
+    const res = await fetch('/api/route/multi', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        origin:      { lat: origin.lat,      lon: origin.lon },
-        destination: { lat: destination.lat, lon: destination.lon },
-      }),
+      body: JSON.stringify({ waypoints: resolved, speed_knots: speed }),
     });
 
     const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || 'Server error');
-    }
+    if (!res.ok) throw new Error(data.detail || 'Server error');
 
-    renderRoute(data);
-    renderStats(data);
-
+    renderVoyageRoute(data);
+    renderVoyageResults(data);
   } catch (err) {
     showError(err.message);
   } finally {
@@ -286,105 +307,155 @@ ui.calcBtn.addEventListener('click', async () => {
   }
 });
 
+// ── Render multi-leg route on map ─────────────────────────────────────────
+function renderVoyageRoute(data) {
+  if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
+  if (markersLayer) { markersLayer.remove(); markersLayer = null; }
+
+  const group = L.featureGroup();
+  const legColors = ['#2196f3', '#4caf50', '#ff9800', '#9c27b0', '#00bcd4', '#e91e63', '#ff5722'];
+
+  data.legs.forEach((leg, i) => {
+    const color = legColors[i % legColors.length];
+
+    // Route polyline with hover
+    const routeCoords = leg.route.geometry.coordinates;
+    const cumDist = buildCumDist(routeCoords);
+    const totalNmi = cumDist[cumDist.length - 1];
+
+    const tooltip = L.tooltip({ sticky: true, className: 'route-tooltip', offset: [14, 0] });
+
+    const geojson = L.geoJSON(leg.route, {
+      style: { color, weight: 4, opacity: 0.85 },
+    });
+
+    geojson.eachLayer(layer => {
+      layer.on('mousemove', e => {
+        const elapsedNmi = distAlongRoute(e.latlng, routeCoords, cumDist);
+        const remainNmi  = Math.max(0, totalNmi - elapsedNmi);
+        const spd = getSpeed();
+
+        tooltip
+          .setLatLng(e.latlng)
+          .setContent(`
+            <div class="rt-row"><span class="rt-dot" style="background:${color}"></span>
+            <span class="rt-label">Leg ${leg.leg}</span>
+            <span class="rt-val">${leg.origin.name} &rarr; ${leg.destination.name}</span></div>
+            <hr class="rt-divider"/>
+            <div class="rt-row"><span class="rt-dot" style="background:#26a69a"></span>
+            <span class="rt-label">From start</span><span class="rt-val">${elapsedNmi.toFixed(0)} nmi</span></div>
+            <div class="rt-row"><span class="rt-dot" style="background:#ef5350"></span>
+            <span class="rt-label">Remaining</span><span class="rt-val">${remainNmi.toFixed(0)} nmi</span></div>
+            <div class="rt-row"><span class="rt-dot" style="background:transparent"></span>
+            <span class="rt-label">ETA</span><span class="rt-val">${formatDuration(remainNmi / spd)}</span>
+            <span style="color:var(--text2);font-size:11px">at ${spd} kn</span></div>`)
+          .openOn(map);
+      });
+      layer.on('mouseout', () => { map.closeTooltip(tooltip); });
+    });
+
+    geojson.addTo(group);
+
+    // Origin marker
+    const oIcon = makeIcon(i === 0 ? '#26a69a' : color, i === 0 ? '1' : String(i + 1));
+    L.marker([leg.origin.lat, leg.origin.lon], { icon: oIcon })
+      .bindPopup(`<strong>${escHtml(leg.origin.name)}</strong>`)
+      .addTo(group);
+
+    // Destination marker (only for last leg)
+    if (i === data.legs.length - 1) {
+      const dIcon = makeIcon('#ef5350', String(i + 2));
+      L.marker([leg.destination.lat, leg.destination.lon], { icon: dIcon })
+        .bindPopup(`<strong>${escHtml(leg.destination.name)}</strong>`)
+        .addTo(group);
+    }
+  });
+
+  group.addTo(map);
+  map.fitBounds(group.getBounds(), { padding: [40, 40] });
+  markersLayer = group;
+}
+
+// ── Render voyage results in sidebar ──────────────────────────────────────
+function renderVoyageResults(data) {
+  const resultsDiv = $('voyage-results');
+  resultsDiv.classList.remove('hidden');
+
+  const t = data.totals;
+  const speed = data.speed_knots;
+
+  // Fuel calculation
+  const fuelConsumption = parseFloat($('fuel-consumption').value) || 22;
+  const fuelPrice       = parseFloat($('fuel-price').value) || 600;
+  const totalDays       = t.duration_hours / 24;
+  const totalFuelMT     = totalDays * fuelConsumption;
+  const totalFuelCost   = totalFuelMT * fuelPrice;
+
+  // Summary
+  $('voyage-summary').innerHTML = `
+    <div class="stats-route-label">${data.legs.map(l => l.origin.name).concat([data.legs[data.legs.length - 1].destination.name]).join(' &rarr; ')}</div>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value">${Number(t.distance_nmi).toLocaleString()} nmi</div>
+        <div class="stat-label">Total Distance</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${formatDuration(t.duration_hours)}</div>
+        <div class="stat-label">Transit at ${speed} kn</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${Number(t.distance_km).toLocaleString()} km</div>
+        <div class="stat-label">Kilometers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${t.legs} leg${t.legs > 1 ? 's' : ''}</div>
+        <div class="stat-label">Route Legs</div>
+      </div>
+    </div>`;
+
+  // Per-leg breakdown
+  $('voyage-legs').innerHTML = data.legs.map(leg => `
+    <div class="voyage-leg">
+      <div class="voyage-leg-header">
+        <span class="voyage-leg-num">Leg ${leg.leg}</span>
+        <span class="voyage-leg-route">${escHtml(leg.origin.name)} &rarr; ${escHtml(leg.destination.name)}</span>
+      </div>
+      <div class="voyage-leg-stats">
+        <span>${Number(leg.distance_nmi).toLocaleString()} nmi</span>
+        <span>${formatDuration(leg.duration_hours)}</span>
+        <span>${Number(leg.distance_km).toLocaleString()} km</span>
+      </div>
+    </div>`).join('');
+
+  // Fuel summary
+  $('voyage-fuel').innerHTML = `
+    <div class="voyage-fuel-card">
+      <div class="voyage-fuel-title">Fuel Estimate</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${totalFuelMT.toFixed(1)} MT</div>
+          <div class="stat-label">Total Fuel</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">$${totalFuelCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+          <div class="stat-label">Fuel Cost</div>
+        </div>
+      </div>
+      <div class="voyage-fuel-detail">${fuelConsumption} MT/day &times; ${totalDays.toFixed(1)} days &times; $${fuelPrice}/MT</div>
+    </div>`;
+}
+
 // ── Cursor lat/lon readout ─────────────────────────────────────────────────
 const cursorEl = document.getElementById('cursor-pos');
 map.on('mousemove', e => {
   const { lat, lng } = e.latlng;
   cursorEl.textContent =
-    `${Math.abs(lat).toFixed(4)}°${lat >= 0 ? 'N' : 'S'}  `
-    + `${Math.abs(lng).toFixed(4)}°${lng >= 0 ? 'E' : 'W'}`;
+    `${Math.abs(lat).toFixed(4)}\u00b0${lat >= 0 ? 'N' : 'S'}  `
+    + `${Math.abs(lng).toFixed(4)}\u00b0${lng >= 0 ? 'E' : 'W'}`;
 });
-map.on('mouseout', () => { cursorEl.textContent = '—'; });
+map.on('mouseout', () => { cursorEl.textContent = '\u2014'; });
 
-// ── Map rendering ──────────────────────────────────────────────────────────
-function renderRoute(data) {
-  // Remove previous layers
-  if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
-  if (markersLayer) { markersLayer.remove(); markersLayer = null; }
-
-  const group = L.featureGroup();
-
-  // Pre-compute cumulative distances along route
-  const routeCoords = data.route.geometry.coordinates; // [[lon,lat],...]
-  const cumDist     = buildCumDist(routeCoords);
-  const totalNmi    = cumDist[cumDist.length - 1];
-
-  // Route polyline with hover tooltip
-  const tooltip = L.tooltip({
-    sticky:    true,
-    className: 'route-tooltip',
-    offset:    [14, 0],
-  });
-
-  const geojson = L.geoJSON(data.route, {
-    style: {
-      color:     '#2196f3',
-      weight:    5,
-      opacity:   0.85,
-      dashArray: null,
-    },
-  });
-
-  geojson.eachLayer(layer => {
-    layer.on('mousemove', e => {
-      const elapsedNmi  = distAlongRoute(e.latlng, routeCoords, cumDist);
-      const remainNmi   = Math.max(0, totalNmi - elapsedNmi);
-      const elapsedKm   = elapsedNmi * 1.852;
-      const spd         = getSpeed();
-      const etaHours    = remainNmi / spd;
-
-      tooltip
-        .setLatLng(e.latlng)
-        .setContent(`
-          <div class="rt-row">
-            <span class="rt-dot" style="background:#26a69a"></span>
-            <span class="rt-label">From origin</span>
-            <span class="rt-val">${elapsedNmi.toFixed(0)} nmi</span>
-            <span style="color:var(--text2);font-size:11px">(${(elapsedKm).toFixed(0)} km)</span>
-          </div>
-          <hr class="rt-divider"/>
-          <div class="rt-row">
-            <span class="rt-dot" style="background:#ef5350"></span>
-            <span class="rt-label">Remaining</span>
-            <span class="rt-val">${remainNmi.toFixed(0)} nmi</span>
-          </div>
-          <div class="rt-row">
-            <span class="rt-dot" style="background:transparent"></span>
-            <span class="rt-label">ETA</span>
-            <span class="rt-val">${formatDuration(etaHours)}</span>
-            <span style="color:var(--text2);font-size:11px">at ${spd} kn</span>
-          </div>`)
-        .openOn(map);
-    });
-
-    layer.on('mouseout', () => { map.closeTooltip(tooltip); });
-  });
-
-  geojson.addTo(group);
-
-  // Markers
-  const originIcon = makeIcon('#26a69a', '●');
-  const destIcon   = makeIcon('#ef5350', '■');
-
-  const oLat = data.origin.lat;
-  const oLon = data.origin.lon;
-  const dLat = data.destination.lat;
-  const dLon = data.destination.lon;
-
-  L.marker([oLat, oLon], { icon: originIcon })
-    .bindPopup(`<strong>${escHtml(data.origin.name)}</strong><br>${oLat.toFixed(4)}, ${oLon.toFixed(4)}`)
-    .addTo(group);
-
-  L.marker([dLat, dLon], { icon: destIcon })
-    .bindPopup(`<strong>${escHtml(data.destination.name)}</strong><br>${dLat.toFixed(4)}, ${dLon.toFixed(4)}`)
-    .addTo(group);
-
-  group.addTo(map);
-  map.fitBounds(group.getBounds(), { padding: [40, 40] });
-
-  markersLayer = group;
-}
-
+// ── Map rendering helpers ─────────────────────────────────────────────────
 function makeIcon(color, symbol) {
   return L.divIcon({
     className: '',
@@ -408,43 +479,33 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Stats ──────────────────────────────────────────────────────────────────
-function renderStats(data) {
-  lastRouteData = data;
-  ui.statsLabel.textContent = `${data.origin.name} → ${data.destination.name}`;
-  ui.statKm.textContent  = Number(data.distance_km).toLocaleString()  + ' km';
-  ui.statNmi.textContent = Number(data.distance_nmi).toLocaleString() + ' nmi';
-  ui.statTime.textContent = formatDuration(data.distance_nmi / getSpeed());
-  document.querySelector('#stats-panel .stat-card.wide .stat-label').textContent =
-    `Transit at ${getSpeed()} kn`;
-  showStats();
-}
-
 // ── UI helpers ─────────────────────────────────────────────────────────────
 function showError(msg)    { ui.errorBox.textContent = msg; ui.errorBox.classList.remove('hidden'); }
 function hideError()       { ui.errorBox.classList.add('hidden'); }
-function showStats()       { ui.statsPanel.classList.remove('hidden'); }
-function hideStats()       { ui.statsPanel.classList.add('hidden'); }
 function showLoading(on)   { ui.loading.classList.toggle('hidden', !on); ui.calcBtn.disabled = on; }
 
 
 // ── App Mode ──────────────────────────────────────────────────────────────
-let appMode           = 'route';   // 'route' | 'congestion'
-let congestionData    = null;      // cached /api/congestion/v2 response
+let appMode           = 'voyage';
+let congestionData    = null;
 let portMarkers       = L.featureGroup().addTo(map);
 let selectedPortLocode = null;
 let currentSortKey    = 'score';
 
 function switchMode(mode) {
-  const routeEl   = $('route-mode');
-  const congEl    = $('congestion-mode');
-  const liveEl    = $('live-mode');
-  const flowEl    = $('flow-mode');
-  const btnRoute  = $('btn-route-mode');
-  const btnCong   = $('btn-congestion-mode');
-  const btnLive   = $('btn-live-mode');
-  const btnFlow   = $('btn-flow-mode');
+  const voyageEl   = $('voyage-mode');
+  const portwatchEl = $('portwatch-mode');
+  const finderEl   = $('finder-mode');
+  const weatherEl  = $('weather-mode');
+  const marketEl   = $('market-mode');
 
+  const btnVoyage   = $('btn-voyage-mode');
+  const btnPortwatch = $('btn-portwatch-mode');
+  const btnFinder   = $('btn-finder-mode');
+  const btnWeather  = $('btn-weather-mode');
+  const btnMarket   = $('btn-market-mode');
+
+  // Stop live polling
   if (livePollingTimer) {
     clearInterval(livePollingTimer);
     livePollingTimer = null;
@@ -454,79 +515,48 @@ function switchMode(mode) {
 
   appMode = mode;
 
-  routeEl.classList.add('hidden');
-  congEl.classList.add('hidden');
-  liveEl.classList.add('hidden');
-  flowEl.classList.add('hidden');
-  btnRoute.classList.remove('active');
-  btnCong.classList.remove('active');
-  btnLive.classList.remove('active');
-  btnFlow.classList.remove('active');
+  // Hide all mode panels
+  voyageEl.classList.add('hidden');
+  portwatchEl.classList.add('hidden');
+  finderEl.classList.add('hidden');
+  weatherEl.classList.add('hidden');
+  marketEl.classList.add('hidden');
 
+  // Deactivate all buttons
+  btnVoyage.classList.remove('active');
+  btnPortwatch.classList.remove('active');
+  btnFinder.classList.remove('active');
+  btnWeather.classList.remove('active');
+  btnMarket.classList.remove('active');
+
+  // Clear map overlays
   portMarkers.clearLayers();
+  finderMarkers.clearLayers();
+  if (finderTrackLayer) { finderTrackLayer.remove(); finderTrackLayer = null; }
   closePortDetail();
   if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
   if (markersLayer) { markersLayer.remove(); markersLayer = null; }
 
-  if (mode === 'route') {
-    routeEl.classList.remove('hidden');
-    btnRoute.classList.add('active');
-  } else if (mode === 'congestion') {
-    congEl.classList.remove('hidden');
-    btnCong.classList.add('active');
-    loadCongestionData();
-  } else if (mode === 'live') {
-    liveEl.classList.remove('hidden');
-    btnLive.classList.add('active');
+  if (mode === 'voyage') {
+    voyageEl.classList.remove('hidden');
+    btnVoyage.classList.add('active');
+  } else if (mode === 'portwatch') {
+    portwatchEl.classList.remove('hidden');
+    btnPortwatch.classList.add('active');
     liveVesselMarkers.addTo(map);
     livePortMarkers.addTo(map);
     loadLiveData();
     livePollingTimer = setInterval(loadLiveData, LIVE_POLL_INTERVAL);
-  } else if (mode === 'flow') {
-    flowEl.classList.remove('hidden');
-    btnFlow.classList.add('active');
-    loadCargoFlow();
-  }
-}
-
-// ── Sort buttons ────────────────────────────────────────────────────────────
-document.querySelectorAll('.sort-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentSortKey = btn.dataset.sort;
-    if (congestionData) {
-      const sorted = sortPorts(congestionData.ports, currentSortKey);
-      renderPortList(sorted);
-    }
-  });
-});
-
-function sortPorts(ports, key) {
-  const copy = [...ports];
-  if (key === 'score') return copy.sort((a, b) => b.congestion_score - a.congestion_score);
-  if (key === 'wait')  return copy.sort((a, b) => b.avg_actual_wait_hrs - a.avg_actual_wait_hrs);
-  if (key === 'queue') return copy.sort((a, b) => b.peak_anchored - a.peak_anchored);
-  return copy;
-}
-
-// ── Congestion data ───────────────────────────────────────────────────────
-async function loadCongestionData() {
-  const loadingEl = $('congestion-loading');
-  loadingEl.classList.remove('hidden');
-
-  try {
-    const res = await fetch('/api/congestion/v2');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    congestionData = await res.json();
-
-    const sorted = sortPorts(congestionData.ports, currentSortKey);
-    renderPortMarkers(sorted);
-    renderPortList(sorted);
-  } catch (err) {
-    $('port-list').innerHTML = `<div class="cong-error">Failed to load congestion data: ${escHtml(err.message)}</div>`;
-  } finally {
-    loadingEl.classList.add('hidden');
+  } else if (mode === 'finder') {
+    finderEl.classList.remove('hidden');
+    btnFinder.classList.add('active');
+    finderMarkers.addTo(map);
+  } else if (mode === 'weather') {
+    weatherEl.classList.remove('hidden');
+    btnWeather.classList.add('active');
+  } else if (mode === 'market') {
+    marketEl.classList.remove('hidden');
+    btnMarket.classList.add('active');
   }
 }
 
@@ -546,108 +576,32 @@ function levelClass(level) {
   return `severity-${(level || 'low').toLowerCase()}`;
 }
 
-// ── Port markers on map ────────────────────────────────────────────────────
-function renderPortMarkers(ports) {
-  portMarkers.clearLayers();
-
-  ports.forEach(port => {
-    if (port.lat == null || port.lon == null) return;
-
-    const score   = Number(port.congestion_score) || 0;
-    const anchored = Number(port.peak_anchored) || 0;
-    const radius  = Math.max(5, Math.min(35, 5 + anchored * 1.5));
-    const color   = levelColor(port.congestion_level);
-
-    const circle = L.circleMarker([port.lat, port.lon], {
-      radius,
-      color,
-      weight:      2,
-      opacity:     0.9,
-      fillColor:   color,
-      fillOpacity: 0.35,
-    });
-
-    circle.bindTooltip(`
-      <strong>${escHtml(port.name)}</strong><br>
-      ${escHtml(port.port_locode)} · ${escHtml(port.country || '')}<br>
-      Score: <strong>${score}</strong> · ${escHtml(port.congestion_level || 'LOW')}
-    `, { sticky: true, className: 'port-tooltip' });
-
-    circle.on('click', () => openPortDetail(port.port_locode));
-
-    portMarkers.addLayer(circle);
-  });
-}
-
-// ── Port list in sidebar ───────────────────────────────────────────────────
-function renderPortList(ports) {
-  const listEl = $('port-list');
-  if (!ports || ports.length === 0) {
-    listEl.innerHTML = '<div class="cong-empty">No port data available.</div>';
-    return;
-  }
-
-  listEl.innerHTML = '';
-  ports.forEach(port => {
-    const score    = Number(port.congestion_score) || 0;
-    const anchored = Number(port.peak_anchored) || 0;
-    const wait     = Number(port.avg_actual_wait_hrs) || 0;
-    const level    = port.congestion_level || 'LOW';
-    const color    = levelColor(level);
-
-    const item = document.createElement('div');
-    item.className = `port-list-item ${selectedPortLocode === port.port_locode ? 'selected' : ''}`;
-    item.dataset.locode = port.port_locode;
-    item.innerHTML = `
-      <div class="pli-stripe ${levelClass(level)}"></div>
-      <div class="pli-body">
-        <div class="pli-top">
-          <div class="pli-name">${escHtml(port.name)}</div>
-          <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${score}</div>
-        </div>
-        <div class="pli-sub">
-          <span class="pli-country">${escHtml(port.country || '')} · ${escHtml(port.port_locode)}</span>
-          <span class="pli-stats">⚓ ${anchored} peak · ${wait > 0 ? wait.toFixed(1) + 'h wait' : 'no wait data'}</span>
-        </div>
-        <div class="pli-bar-track">
-          <div class="pli-bar-fill" style="width:${score}%;background:${color}"></div>
-        </div>
-      </div>
-    `;
-    item.addEventListener('click', () => openPortDetail(port.port_locode));
-    listEl.appendChild(item);
-  });
-}
-
 // ── Port detail panel ──────────────────────────────────────────────────────
 async function openPortDetail(locode) {
   selectedPortLocode = locode;
 
-  // Highlight selected item in list
   document.querySelectorAll('.port-list-item').forEach(el => {
     el.classList.toggle('selected', el.dataset.locode === locode);
   });
 
-  // Show panel immediately with loading state
   const panel = $('port-detail');
   panel.classList.remove('hidden');
   panel.classList.add('open');
 
-  $('pd-port-name').textContent = 'Loading…';
+  $('pd-port-name').textContent = 'Loading\u2026';
   $('pd-port-meta').textContent = '';
-  $('pd-score-val').textContent = '—';
-  $('pd-level-badge').textContent = '—';
+  $('pd-score-val').textContent = '\u2014';
+  $('pd-level-badge').textContent = '\u2014';
   $('pd-level-badge').className = 'pd-level-badge';
-  $('pd-peak-anchored').textContent = '—';
-  $('pd-avg-wait').textContent = '—';
-  $('pd-peak-berthed').textContent = '—';
-  $('pd-transitioned').textContent = '—';
+  $('pd-peak-anchored').textContent = '\u2014';
+  $('pd-avg-wait').textContent = '\u2014';
+  $('pd-peak-berthed').textContent = '\u2014';
+  $('pd-transitioned').textContent = '\u2014';
   $('pd-vessel-list').innerHTML = '';
   $('pd-state-breakdown').innerHTML = '';
-  $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading chart…</div>';
+  $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading chart\u2026</div>';
 
   try {
-    // Fetch port detail and timeline in parallel
     const [detailRes, timelineRes] = await Promise.all([
       fetch(`/api/congestion/v2/${encodeURIComponent(locode)}`),
       fetch(`/api/congestion/${encodeURIComponent(locode)}/timeline`),
@@ -659,7 +613,6 @@ async function openPortDetail(locode) {
 
     renderPortDetail(detail, timeline);
 
-    // Pan map to port
     if (detail.summary.lat != null && detail.summary.lon != null) {
       map.panTo([detail.summary.lat, detail.summary.lon], { animate: true });
     }
@@ -673,11 +626,8 @@ function closePortDetail() {
   selectedPortLocode = null;
   const panel = $('port-detail');
   panel.classList.remove('open');
-  // Wait for transition then hide
   setTimeout(() => {
-    if (!panel.classList.contains('open')) {
-      panel.classList.add('hidden');
-    }
+    if (!panel.classList.contains('open')) panel.classList.add('hidden');
   }, 300);
   document.querySelectorAll('.port-list-item').forEach(el => el.classList.remove('selected'));
 }
@@ -688,12 +638,10 @@ function renderPortDetail(detail, timeline) {
   const score = Number(s.congestion_score) || 0;
   const color = levelColor(level);
 
-  // Header
   $('pd-port-name').textContent = s.name || s.port_locode;
-  $('pd-port-meta').textContent = `${s.port_locode} · ${s.country || ''}`;
+  $('pd-port-meta').textContent = `${s.port_locode} \u00b7 ${s.country || ''}`;
 
-  // Score ring
-  const circumference = 2 * Math.PI * 32; // r=32
+  const circumference = 2 * Math.PI * 32;
   const fill = $('pd-ring-fill');
   fill.style.stroke = color;
   const offset = circumference * (1 - score / 100);
@@ -707,39 +655,26 @@ function renderPortDetail(detail, timeline) {
   badge.textContent = level;
   badge.className   = `pd-level-badge level-${level.toLowerCase()}`;
 
-  // Metrics
   $('pd-peak-anchored').textContent  = Number(s.peak_anchored) || 0;
   const wait = Number(s.avg_actual_wait_hrs);
   $('pd-avg-wait').textContent       = wait > 0 ? wait.toFixed(1) + 'h' : 'N/A';
   $('pd-peak-berthed').textContent   = Number(s.peak_berthed) || 0;
   $('pd-transitioned').textContent   = Number(s.vessels_transitioned) || 0;
 
-  // Timeline chart
   drawTimelineChart('pd-timeline-chart', timeline.timeline || []);
-
-  // State breakdown
   renderStateBreakdown(detail.breakdown || [], detail.vessels || []);
-
-  // Vessel list
   renderVesselList(detail.vessels || []);
 }
 
 function renderStateBreakdown(breakdown, vessels) {
   const el = $('pd-state-breakdown');
-
-  // Count vessels per state from the last-seen vessel list
   const stateCounts = {};
-  vessels.forEach(v => {
-    stateCounts[v.state] = (stateCounts[v.state] || 0) + 1;
-  });
+  vessels.forEach(v => { stateCounts[v.state] = (stateCounts[v.state] || 0) + 1; });
 
   const states = ['ANCHORED', 'BERTHED', 'APPROACHING', 'MANEUVERING', 'TRANSITING'];
   const stateColors = {
-    ANCHORED:    '#ff9800',
-    BERTHED:     '#2196f3',
-    APPROACHING: '#9c27b0',
-    MANEUVERING: '#00bcd4',
-    TRANSITING:  '#4caf50',
+    ANCHORED: '#ff9800', BERTHED: '#2196f3', APPROACHING: '#9c27b0',
+    MANEUVERING: '#00bcd4', TRANSITING: '#4caf50',
   };
 
   const total = vessels.length || 1;
@@ -766,27 +701,22 @@ function renderVesselList(vessels) {
     el.innerHTML = '<div class="vessel-empty">No recent vessel data.</div>';
     return;
   }
-
   const stateColors = {
-    ANCHORED:    '#ff9800',
-    BERTHED:     '#2196f3',
-    APPROACHING: '#9c27b0',
-    MANEUVERING: '#00bcd4',
-    TRANSITING:  '#4caf50',
+    ANCHORED: '#ff9800', BERTHED: '#2196f3', APPROACHING: '#9c27b0',
+    MANEUVERING: '#00bcd4', TRANSITING: '#4caf50',
   };
-
   el.innerHTML = vessels.map(v => {
     const col      = stateColors[v.state] || '#8b949e';
-    const lastSeen = v.last_seen ? new Date(v.last_seen).toLocaleDateString() : '—';
+    const lastSeen = v.last_seen ? new Date(v.last_seen).toLocaleDateString() : '\u2014';
     const distStr  = v.dist_nm != null ? `${v.dist_nm} nm` : '';
     return `
       <div class="vessel-row">
         <div class="vessel-row-top">
-          <span class="vessel-name">${escHtml(v.name || v.imo || '—')}</span>
+          <span class="vessel-name">${escHtml(v.name || v.imo || '\u2014')}</span>
           <span class="state-badge" style="background:${col}20;color:${col};border-color:${col}40">${v.state}</span>
         </div>
         <div class="vessel-row-sub">
-          <span class="vessel-type">${escHtml(v.vessel_type || '—')}</span>
+          <span class="vessel-type">${escHtml(v.vessel_type || '\u2014')}</span>
           ${distStr ? `<span class="vessel-dist">${escHtml(distStr)}</span>` : ''}
           <span class="vessel-time">${lastSeen}</span>
         </div>
@@ -809,7 +739,6 @@ function drawTimelineChart(containerId, timelineData) {
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
-  // Parse data
   const points = timelineData.map(d => ({
     t:        new Date(d.time).getTime(),
     anchored: Number(d.anchored) || 0,
@@ -831,11 +760,9 @@ function drawTimelineChart(containerId, timelineData) {
   function makeAreaPath(key) {
     const base = PAD.top + chartH;
     const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xp(p.t).toFixed(1)},${yp(p[key]).toFixed(1)}`).join(' ');
-    const close = `L${xp(maxT).toFixed(1)},${base} L${xp(minT).toFixed(1)},${base} Z`;
-    return line + ' ' + close;
+    return line + ` L${xp(maxT).toFixed(1)},${base} L${xp(minT).toFixed(1)},${base} Z`;
   }
 
-  // Y-axis ticks
   const yTicks = [0, Math.ceil(maxVal / 2), maxVal];
   const yTickLines = yTicks.map(v => {
     const y = yp(v).toFixed(1);
@@ -846,7 +773,6 @@ function drawTimelineChart(containerId, timelineData) {
             fill="#8b949e" font-size="9">${v}</text>`;
   }).join('');
 
-  // X-axis labels (up to 4 ticks)
   const xTickCount = Math.min(4, points.length);
   const xTickIdxs  = Array.from({ length: xTickCount }, (_, i) =>
     Math.round(i * (points.length - 1) / (xTickCount - 1)));
@@ -860,9 +786,8 @@ function drawTimelineChart(containerId, timelineData) {
       <text x="${x}" y="${H - 6}" text-anchor="middle" fill="#8b949e" font-size="9">${lbl}</text>`;
   }).join('');
 
-  const svgId = `svg-${containerId}`;
   const svg = `
-    <svg id="${svgId}" width="100%" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="grad-anchored-${containerId}" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#ff9800" stop-opacity="0.4"/>
@@ -873,20 +798,12 @@ function drawTimelineChart(containerId, timelineData) {
           <stop offset="100%" stop-color="#2196f3" stop-opacity="0.02"/>
         </linearGradient>
       </defs>
-
-      <!-- Grid -->
       ${yTickLines}
       ${xTickLines}
-
-      <!-- Area fills -->
       <path d="${makeAreaPath('anchored')}" fill="url(#grad-anchored-${containerId})"/>
       <path d="${makeAreaPath('berthed')}"  fill="url(#grad-berthed-${containerId})"/>
-
-      <!-- Lines -->
       <path d="${makePath('anchored')}" fill="none" stroke="#ff9800" stroke-width="2" stroke-linejoin="round"/>
       <path d="${makePath('berthed')}"  fill="none" stroke="#2196f3" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="5 3"/>
-
-      <!-- Legend -->
       <rect x="${PAD.left}" y="${H - 14}" width="8" height="3" rx="1.5" fill="#ff9800"/>
       <text x="${PAD.left + 11}" y="${H - 10}" fill="#8b949e" font-size="9">Anchored</text>
       <rect x="${PAD.left + 62}" y="${H - 14}" width="8" height="3" rx="1.5" fill="#2196f3"/>
@@ -896,15 +813,14 @@ function drawTimelineChart(containerId, timelineData) {
   container.innerHTML = svg;
 }
 
-// ── Live Congestion Mode ─────────────────────────────────────────────────────
+// ── Live Congestion (Port Watch) ──────────────────────────────────────────
 let liveData          = null;
 let livePollingTimer  = null;
 let liveVesselMarkers = L.featureGroup();
 let livePortMarkers   = L.featureGroup();
 
-const LIVE_POLL_INTERVAL = 45000; // 45 seconds
+const LIVE_POLL_INTERVAL = 45000;
 
-// ── Load live congestion data ────────────────────────────────────────────────
 async function loadLiveData() {
   try {
     const res = await fetch('/api/congestion/live');
@@ -970,11 +886,11 @@ function renderLivePortList(ports) {
           <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${score}</div>
         </div>
         <div class="pli-sub">
-          <span class="pli-country">${escHtml(port.country || '')} · ${escHtml(port.locode)}</span>
-          <span class="pli-stats">${total} vessels · ${anchored} anchored</span>
+          <span class="pli-country">${escHtml(port.country || '')} \u00b7 ${escHtml(port.locode)}</span>
+          <span class="pli-stats">${total} vessels \u00b7 ${anchored} anchored</span>
         </div>
         <div class="pli-sub">
-          <span class="pli-stats">${berthed} berthed · ${wait > 0 ? wait.toFixed(1) + 'h avg wait' : 'no wait'}</span>
+          <span class="pli-stats">${berthed} berthed \u00b7 ${wait > 0 ? wait.toFixed(1) + 'h avg wait' : 'no wait'}</span>
         </div>
         <div class="pli-bar-track">
           <div class="pli-bar-fill" style="width:${score}%;background:${color}"></div>
@@ -998,18 +914,13 @@ function renderLiveMapMarkers(ports) {
     const radius = Math.max(8, Math.min(35, 8 + (port.anchored_count || 0) * 2));
 
     const circle = L.circleMarker([port.lat, port.lon], {
-      radius,
-      color,
-      weight: 2,
-      opacity: 0.9,
-      fillColor: color,
-      fillOpacity: 0.35,
+      radius, color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.35,
     });
 
     circle.bindTooltip(`
       <strong>${escHtml(port.name)}</strong><br>
-      ${escHtml(port.locode)} · ${escHtml(port.country || '')}<br>
-      Score: <strong>${score}</strong> · ${escHtml(port.severity || 'LOW')}<br>
+      ${escHtml(port.locode)} \u00b7 ${escHtml(port.country || '')}<br>
+      Score: <strong>${score}</strong> \u00b7 ${escHtml(port.severity || 'LOW')}<br>
       Vessels: ${port.total_vessels || 0} (${port.anchored_count || 0} anchored)
     `, { sticky: true, className: 'port-tooltip' });
 
@@ -1029,21 +940,20 @@ async function openLivePortDetail(locode) {
   panel.classList.remove('hidden');
   panel.classList.add('open');
 
-  $('pd-port-name').textContent = 'Loading…';
+  $('pd-port-name').textContent = 'Loading\u2026';
   $('pd-port-meta').textContent = '';
-  $('pd-score-val').textContent = '—';
-  $('pd-level-badge').textContent = '—';
+  $('pd-score-val').textContent = '\u2014';
+  $('pd-level-badge').textContent = '\u2014';
   $('pd-level-badge').className = 'pd-level-badge';
-  $('pd-peak-anchored').textContent = '—';
-  $('pd-avg-wait').textContent = '—';
-  $('pd-peak-berthed').textContent = '—';
-  $('pd-transitioned').textContent = '—';
+  $('pd-peak-anchored').textContent = '\u2014';
+  $('pd-avg-wait').textContent = '\u2014';
+  $('pd-peak-berthed').textContent = '\u2014';
+  $('pd-transitioned').textContent = '\u2014';
   $('pd-vessel-list').innerHTML = '';
   $('pd-state-breakdown').innerHTML = '';
-  $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading live data…</div>';
+  $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading live data\u2026</div>';
 
   try {
-    // Load detail immediately (fast)
     const detailRes = await fetch(`/api/congestion/live/${encodeURIComponent(locode)}`);
     if (!detailRes.ok) throw new Error(`HTTP ${detailRes.status}`);
     const detail = await detailRes.json();
@@ -1055,7 +965,7 @@ async function openLivePortDetail(locode) {
       map.setView([detail.lat, detail.lon], 11, { animate: true });
     }
 
-    // Load intelligence in background (fetches vessel specs + history)
+    // Load intelligence in background
     $('pd-intelligence').innerHTML = '<div class="vessel-empty">Loading port intelligence...</div>';
     fetch(`/api/congestion/live/${encodeURIComponent(locode)}/intelligence`)
       .then(r => r.ok ? r.json() : null)
@@ -1070,13 +980,12 @@ async function openLivePortDetail(locode) {
 }
 
 function renderLivePortDetail(detail) {
-  // Metrics are at top level, not nested under detail.metrics
   const level = detail.severity || 'LOW';
   const score = Number(detail.congestion_score) || 0;
   const color = levelColor(level);
 
   $('pd-port-name').textContent = detail.name || detail.locode;
-  $('pd-port-meta').textContent = `${detail.locode} · ${detail.country || ''} · LIVE`;
+  $('pd-port-meta').textContent = `${detail.locode} \u00b7 ${detail.country || ''} \u00b7 LIVE`;
 
   const circumference = 2 * Math.PI * 32;
   const fill = $('pd-ring-fill');
@@ -1101,7 +1010,7 @@ function renderLivePortDetail(detail) {
   if (metricLabels[0]) metricLabels[0].textContent = 'Anchored';
   if (metricLabels[2]) metricLabels[2].textContent = 'Berthed';
 
-  $('pd-timeline-chart').innerHTML = '<div class="timeline-empty">Live mode — no historical timeline</div>';
+  $('pd-timeline-chart').innerHTML = '<div class="timeline-empty">Live mode \u2014 no historical timeline</div>';
 
   const vessels = detail.vessels || [];
   renderStateBreakdown([], vessels);
@@ -1116,10 +1025,7 @@ function renderLiveVesselList(vessels) {
   }
 
   const stateColors = {
-    ANCHORED:    '#ff9800',
-    BERTHED:     '#2196f3',
-    APPROACHING: '#9c27b0',
-    TRANSITING:  '#4caf50',
+    ANCHORED: '#ff9800', BERTHED: '#2196f3', APPROACHING: '#9c27b0', TRANSITING: '#4caf50',
   };
 
   el.innerHTML = vessels.map(v => {
@@ -1145,10 +1051,7 @@ function renderLiveVesselDots(vessels) {
   liveVesselMarkers.clearLayers();
 
   const stateColors = {
-    ANCHORED:    '#ff9800',
-    BERTHED:     '#2196f3',
-    APPROACHING: '#9c27b0',
-    TRANSITING:  '#4caf50',
+    ANCHORED: '#ff9800', BERTHED: '#2196f3', APPROACHING: '#9c27b0', TRANSITING: '#4caf50',
   };
 
   vessels.forEach(v => {
@@ -1158,75 +1061,18 @@ function renderLiveVesselDots(vessels) {
     const size = v.state === 'ANCHORED' ? 7 : v.state === 'BERTHED' ? 6 : 5;
 
     const marker = L.circleMarker([v.lat, v.lon], {
-      radius:      size,
-      color:       '#fff',
-      weight:      1.5,
-      fillColor:   col,
-      fillOpacity: 0.85,
+      radius: size, color: '#fff', weight: 1.5, fillColor: col, fillOpacity: 0.85,
     });
 
     const waitStr = v.wait_hours > 0 ? `<br>Wait: ${v.wait_hours}h` : '';
     marker.bindTooltip(`
       <strong>${escHtml(v.name || String(v.mmsi))}</strong><br>
-      ${v.state} · ${v.speed || 0} kts<br>
+      ${v.state} \u00b7 ${v.speed || 0} kts<br>
       ${v.dist_to_port_nm || '?'} nm from port${waitStr}
     `, { sticky: true, className: 'port-tooltip' });
 
     liveVesselMarkers.addLayer(marker);
   });
-}
-
-// ── Turnaround stats by vessel type ──────────────────────────────────────────
-function renderTurnaroundStats(data) {
-  const el = $('pd-turnaround');
-  if (!data || !data.by_vessel_type || data.by_vessel_type.length === 0) {
-    el.innerHTML = '<div class="vessel-empty">No turnaround data yet. Data accumulates as vessels are tracked.</div>';
-    return;
-  }
-
-  const o = data.overall;
-  const fmtH = h => h < 1 ? `${Math.round(h * 60)}m` : h < 24 ? `${h.toFixed(1)}h` : `${(h / 24).toFixed(1)}d`;
-
-  let html = `
-    <div class="turnaround-overall">
-      <div class="turnaround-stat">
-        <div class="turnaround-stat-val">${fmtH(o.avg_turnaround_hours)}</div>
-        <div class="turnaround-stat-label">Avg Turnaround</div>
-      </div>
-      <div class="turnaround-stat">
-        <div class="turnaround-stat-val">${fmtH(o.avg_wait_hours)}</div>
-        <div class="turnaround-stat-label">Avg Wait</div>
-      </div>
-      <div class="turnaround-stat">
-        <div class="turnaround-stat-val">${fmtH(o.avg_berth_hours)}</div>
-        <div class="turnaround-stat-label">Avg Berth</div>
-      </div>
-    </div>
-    <table class="turnaround-table">
-      <thead>
-        <tr>
-          <th>Vessel Type</th>
-          <th style="text-align:right">#</th>
-          <th style="text-align:right">Avg Turn</th>
-          <th style="text-align:right">Avg Wait</th>
-          <th style="text-align:right">Avg Berth</th>
-        </tr>
-      </thead>
-      <tbody>`;
-
-  data.by_vessel_type.forEach(t => {
-    html += `
-        <tr>
-          <td class="tt-type" title="${escHtml(t.vessel_type)}">${escHtml(t.vessel_type)}</td>
-          <td class="tt-num">${t.count}</td>
-          <td class="tt-num tt-highlight">${fmtH(t.avg_total_hours)}</td>
-          <td class="tt-num">${fmtH(t.avg_anchor_hours)}</td>
-          <td class="tt-num">${fmtH(t.avg_berth_hours)}</td>
-        </tr>`;
-  });
-
-  html += '</tbody></table>';
-  el.innerHTML = html;
 }
 
 // ── Port Intelligence ─────────────────────────────────────────────────────────
@@ -1247,7 +1093,7 @@ function renderIntelligence(data) {
 
   let html = '';
 
-  // ── Africa Bagged Cargo Leads (TOP PRIORITY) ──────────
+  // Africa Bagged Cargo Leads
   const leads = data.africa_bagged_cargo_leads || [];
   if (leads.length > 0) {
     html += `<div class="intel-section">
@@ -1255,14 +1101,14 @@ function renderIntelligence(data) {
     leads.forEach(l => {
       html += `<div class="intel-lead">
         <div class="intel-lead-name">${escHtml(l.name || String(l.mmsi))}</div>
-        <div class="intel-lead-detail">${escHtml(l.type || '')} · ${escHtml(l.flag || '')} · ${escHtml(l.reason)}</div>
+        <div class="intel-lead-detail">${escHtml(l.type || '')} \u00b7 ${escHtml(l.flag || '')} \u00b7 ${escHtml(l.reason)}</div>
         ${l.destination ? `<div class="intel-lead-detail">Dest: ${escHtml(l.destination)}</div>` : ''}
       </div>`;
     });
     html += '</div>';
   }
 
-  // ── Cargo Estimation ──────────────────────────────────
+  // Cargo Estimation
   const cargo = data.specs?.cargo_estimate;
   if (cargo && cargo.vessels_analyzed > 0) {
     html += `<div class="intel-section">
@@ -1286,7 +1132,7 @@ function renderIntelligence(data) {
     html += '</div>';
   }
 
-  // ── Trade Route Origins ───────────────────────────────
+  // Trade Route Origins
   const origins = data.origins || [];
   if (origins.length > 0) {
     html += `<div class="intel-section">
@@ -1304,7 +1150,7 @@ function renderIntelligence(data) {
     html += '</div>';
   }
 
-  // ── Flag Distribution ─────────────────────────────────
+  // Flag Distribution
   const flags = data.flag_distribution || [];
   if (flags.length > 0) {
     const maxF = flags[0]?.count || 1;
@@ -1321,7 +1167,7 @@ function renderIntelligence(data) {
     html += '</div>';
   }
 
-  // ── Fleet Profile ─────────────────────────────────────
+  // Fleet Profile
   const age = data.specs?.fleet_age;
   const sizes = data.specs?.size_classes;
   if (age && age.vessels_with_data) {
@@ -1346,7 +1192,7 @@ function renderIntelligence(data) {
     html += '</div>';
   }
 
-  // ── Port Specialization ───────────────────────────────
+  // Port Specialization
   const spec = data.port_specialization || [];
   if (spec.length > 0) {
     html += `<div class="intel-section">
@@ -1361,7 +1207,7 @@ function renderIntelligence(data) {
     html += '</div>';
   }
 
-  // ── ETA Analysis ──────────────────────────────────────
+  // ETA Analysis
   const eta = data.eta_analysis;
   if (eta && eta.vessels_with_eta > 0) {
     html += `<div class="intel-section">
@@ -1371,14 +1217,13 @@ function renderIntelligence(data) {
         <div class="intel-card"><div class="intel-val good">${eta.already_arrived}</div><div class="intel-label">Arrived</div></div>
         <div class="intel-card"><div class="intel-val">${eta.still_expected}</div><div class="intel-label">Expected</div></div>
       </div>
-      ${eta.avg_overdue_hours > 0 ? `<div style="font-size:11px;color:var(--text2);text-align:center">Avg ${fmtH(eta.avg_overdue_hours)} past ETA · Max ${fmtH(eta.max_overdue_hours)}</div>` : ''}
+      ${eta.avg_overdue_hours > 0 ? `<div style="font-size:11px;color:var(--text2);text-align:center">Avg ${fmtH(eta.avg_overdue_hours)} past ETA \u00b7 Max ${fmtH(eta.max_overdue_hours)}</div>` : ''}
     </div>`;
   }
 
-  // ── Speed Profile ─────────────────────────────────────
+  // Speed Profile
   const sp = data.speed_profile;
   if (sp) {
-    const total = sp.stationary + sp.slow + sp.moderate + sp.fast || 1;
     html += `<div class="intel-section">
       <div class="intel-section-title">Speed Profile</div>
       <div class="intel-grid">
@@ -1389,133 +1234,282 @@ function renderIntelligence(data) {
     </div>`;
   }
 
-  if (!html) {
-    html = '<div class="vessel-empty">No intelligence data available.</div>';
-  }
-
+  if (!html) html = '<div class="vessel-empty">No intelligence data available.</div>';
   el.innerHTML = html;
 }
 
-// ── Cargo Flow Mode ──────────────────────────────────────────────────────────
-async function loadCargoFlow() {
-  const loading = $('flow-loading');
-  const content = $('flow-content');
-  loading.classList.remove('hidden');
-  loading.textContent = 'Loading cargo flow for all ports...';
-  content.innerHTML = '';
 
-  try {
-    const res = await fetch('/api/cargo-flow');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    loading.classList.add('hidden');
-    renderCargoFlow(data);
-  } catch (err) {
-    loading.textContent = `Error: ${err.message}`;
+// ── Vessel Finder ─────────────────────────────────────────────────────────────
+
+// Port search for finder mode
+(function initFinderPortSearch() {
+  const input = $('finder-port-search');
+  const dropdown = $('finder-port-dropdown');
+  if (!input || !dropdown) return;
+
+  let debounceTimer = null;
+  let focusedIdx = -1;
+  let items = [];
+
+  function openDD(results) {
+    items = results;
+    focusedIdx = -1;
+    dropdown.innerHTML = '';
+    if (!results.length) { dropdown.classList.remove('open'); return; }
+    results.forEach((port, i) => {
+      const div = document.createElement('div');
+      div.className = 'dropdown-item';
+      div.innerHTML = `
+        <span class="di-locode">${port.locode}</span>
+        <div class="di-info">
+          <div class="di-name">${port.name}</div>
+          <div class="di-country">${port.country}</div>
+        </div>`;
+      div.addEventListener('mousedown', e => { e.preventDefault(); selectP(port); });
+      dropdown.appendChild(div);
+    });
+    dropdown.classList.add('open');
   }
-}
 
-function renderCargoFlow(data) {
-  const content = $('flow-content');
-  const ports = data.ports || [];
+  function closeDD() { dropdown.classList.remove('open'); focusedIdx = -1; }
 
-  const fmtT = t => {
-    if (!t) return '0';
-    if (t >= 1000000) return (t / 1000000).toFixed(1) + 'M';
-    if (t >= 1000) return Math.round(t / 1000) + 'K';
-    return String(Math.round(t));
-  };
+  function setFocus(idx) {
+    const divs = dropdown.querySelectorAll('.dropdown-item');
+    divs.forEach(d => d.classList.remove('focused'));
+    if (idx >= 0 && idx < divs.length) {
+      divs[idx].classList.add('focused');
+      divs[idx].scrollIntoView({ block: 'nearest' });
+    }
+    focusedIdx = idx;
+  }
 
-  if (!ports.length) {
-    content.innerHTML = '<div class="vessel-empty">No cargo flow data.</div>';
+  function selectP(port) {
+    finderPort = { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode };
+    input.value = `${port.name} (${port.locode})`;
+    closeDD();
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    finderPort = null;
+    const q = input.value.trim();
+    if (!q) { closeDD(); return; }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=10`);
+        openDD(await res.json());
+      } catch { /* ignore */ }
+    }, 300);
+  });
+
+  input.addEventListener('keydown', e => {
+    if (!dropdown.classList.contains('open')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setFocus(Math.min(focusedIdx + 1, items.length - 1)); }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); setFocus(Math.max(focusedIdx - 1, 0)); }
+    if (e.key === 'Enter')     { if (focusedIdx >= 0) selectP(items[focusedIdx]); }
+    if (e.key === 'Escape')    { closeDD(); }
+  });
+
+  document.addEventListener('click', e => {
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) closeDD();
+  });
+})();
+
+// Search button
+(function initFinderSearch() {
+  const btn = $('finder-search-btn');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    if (!finderPort) {
+      $('finder-results').innerHTML = '<div class="vessel-empty">Select a port first.</div>';
+      return;
+    }
+
+    const typeFilter = $('finder-type-filter').value;
+    const idleOnly   = $('finder-idle-only').checked;
+    const africaOnly = $('finder-africa-only').checked;
+
+    const loading = $('finder-loading');
+    loading.classList.remove('hidden');
+    $('finder-results').innerHTML = '';
+
+    const params = new URLSearchParams({
+      locode: finderPort.locode || '',
+      lat: finderPort.lat,
+      lon: finderPort.lon,
+    });
+    if (typeFilter) params.set('type', typeFilter);
+    if (idleOnly) params.set('idle_only', 'true');
+    if (africaOnly) params.set('africa_only', 'true');
+
+    try {
+      const res = await fetch(`/api/vessels/search?${params}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      renderFinderResults(data);
+    } catch (err) {
+      $('finder-results').innerHTML = `<div class="cong-error">${escHtml(err.message)}</div>`;
+    } finally {
+      loading.classList.add('hidden');
+    }
+  });
+})();
+
+function renderFinderResults(data) {
+  const resultsEl = $('finder-results');
+  const vessels = data.vessels || [];
+
+  finderMarkers.clearLayers();
+
+  if (!vessels.length) {
+    resultsEl.innerHTML = '<div class="vessel-empty">No vessels found near this port.</div>';
     return;
   }
 
-  const sorted = [...ports].sort((a, b) =>
-    (b.current?.total_at_port_tonnes || 0) - (a.current?.total_at_port_tonnes || 0));
+  // Show count
+  let html = `<div style="font-size:11px;color:var(--text2);margin:8px 0">${vessels.length} vessel${vessels.length > 1 ? 's' : ''} found</div>`;
 
-  let html = '';
+  vessels.forEach(v => {
+    const avail = v.availability || {};
+    const score = avail.score != null ? avail.score : 0;
+    const badgeClass = score >= 0.6 ? 'avail-high' : score >= 0.3 ? 'avail-med' : 'avail-low';
+    const badgeText  = score >= 0.6 ? 'Likely Available' : score >= 0.3 ? 'Possibly Available' : 'In Use';
+    const isAfrica   = v.africa_trade;
 
-  let grandBerth = 0, grandAnchor = 0, grandEnroute = 0, grandVessels = 0;
-  sorted.forEach(p => {
-    const c = p.current || {};
-    grandBerth += c.at_berth?.est_cargo_tonnes || 0;
-    grandAnchor += c.at_anchor?.est_cargo_tonnes || 0;
-    grandEnroute += c.approaching?.est_cargo_tonnes || 0;
-    grandVessels += (c.at_berth?.vessels || 0) + (c.at_anchor?.vessels || 0);
-  });
-
-  html += `<div class="flow-port-card" style="border-color:var(--accent)">
-    <div class="flow-port-name" style="color:var(--accent)">All Ports Summary</div>
-    <div class="flow-stats">
-      <div class="flow-stat"><div class="flow-stat-val">${fmtT(grandBerth + grandAnchor)}t</div><div class="flow-stat-label">At Port</div></div>
-      <div class="flow-stat"><div class="flow-stat-val warn">${fmtT(grandEnroute)}t</div><div class="flow-stat-label">En Route</div></div>
-      <div class="flow-stat"><div class="flow-stat-val">${grandVessels}</div><div class="flow-stat-label">Cargo Ships</div></div>
-    </div>
-  </div>`;
-
-  sorted.forEach(p => {
-    const c = p.current || {};
-    const atPort = (c.total_at_port_tonnes || 0);
-    const enroute = (c.total_enroute_tonnes || 0);
-    const berthV = c.at_berth?.vessels || 0;
-    const anchorV = c.at_anchor?.vessels || 0;
-    const approachV = c.approaching?.vessels || 0;
-    const weekly = p.weekly_arrivals_30d || [];
-
-    html += `<div class="flow-port-card">
-      <div class="flow-port-name">${escHtml(p.name)} <span style="color:var(--text2);font-weight:400;font-size:11px">${escHtml(p.locode)}</span></div>
-      <div class="flow-stats">
-        <div class="flow-stat"><div class="flow-stat-val">${fmtT(atPort)}t</div><div class="flow-stat-label">At Port</div></div>
-        <div class="flow-stat"><div class="flow-stat-val warn">${fmtT(enroute)}t</div><div class="flow-stat-label">En Route</div></div>
-        <div class="flow-stat"><div class="flow-stat-val">${berthV + anchorV + approachV}</div><div class="flow-stat-label">Ships</div></div>
-      </div>
-      <div style="display:flex;gap:4px;margin-top:6px;font-size:10px;color:var(--text2)">
-        <span>${berthV} berth</span> · <span>${anchorV} anchor</span> · <span>${approachV} approach</span>
-      </div>`;
-
-    // Weekly arrivals bar chart
-    if (weekly.length > 0) {
-      const maxArr = Math.max(...weekly.map(w => w.arrivals), 1);
-      html += `<div style="margin-top:6px">
-        <div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-bottom:3px">Weekly Arrivals (30d)</div>
-        <div style="display:flex;gap:2px;align-items:flex-end;height:30px">`;
-      weekly.forEach(w => {
-        const h = Math.max(3, Math.round((w.arrivals / maxArr) * 28));
-        html += `<div title="${w.week}: ${w.arrivals} arrivals, ${fmtT(w.est_tonnes)}t" style="flex:1;height:${h}px;background:var(--accent);border-radius:2px;min-width:8px"></div>`;
-      });
-      html += `</div></div>`;
-
-      // Weekly tonnage summary
-      const totalWeeklyT = weekly.reduce((s, w) => s + (w.est_tonnes || 0), 0);
-      const totalArrivals = weekly.reduce((s, w) => s + w.arrivals, 0);
-      html += `<div style="font-size:10px;color:var(--text2);margin-top:3px">
-        30d total: ${totalArrivals} arrivals · ${fmtT(totalWeeklyT)}t throughput
-      </div>`;
-    }
-
-    // Daily occupancy chart (vessels at port each day)
-    const daily = p.daily_occupancy_30d || [];
-    if (daily.length > 0) {
-      const maxV = Math.max(...daily.map(d => d.vessels), 1);
-      html += `<div style="margin-top:6px">
-        <div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-bottom:3px">Daily Cargo Vessels at Port (30d)</div>
-        <div style="display:flex;gap:1px;align-items:flex-end;height:30px">`;
-      daily.forEach(d => {
-        const h = Math.max(2, Math.round((d.vessels / maxV) * 28));
-        const dateStr = d.date.substring(5); // MM-DD
-        html += `<div title="${d.date}: ${d.vessels} vessels" style="flex:1;height:${h}px;background:#ff9800;border-radius:1px;min-width:3px"></div>`;
-      });
-      html += `</div>
-        <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--text2);margin-top:2px">
-          <span>${daily[0]?.date?.substring(5) || ''}</span>
-          <span>${daily[daily.length-1]?.date?.substring(5) || ''}</span>
+    html += `
+      <div class="finder-vessel" data-mmsi="${v.mmsi}">
+        <div class="finder-vessel-top">
+          <span class="vessel-name">${escHtml(v.name || String(v.mmsi))}</span>
+          <span class="avail-badge ${badgeClass}">${badgeText}</span>
         </div>
+        <div class="finder-vessel-meta">
+          <span>${escHtml(v.type || v.vessel_type || 'Unknown')}</span>
+          <span>${v.speed != null ? v.speed + ' kts' : ''}</span>
+          <span>${v.distance_nm != null ? v.distance_nm.toFixed(1) + ' nm' : ''}</span>
+          ${isAfrica ? '<span class="africa-badge">Africa Trade</span>' : ''}
+        </div>
+        ${avail.reasons?.length ? `<div class="finder-vessel-reasons">${avail.reasons.join(' \u00b7 ')}</div>` : ''}
+        ${v.destination ? `<div class="finder-vessel-reasons">Dest: ${escHtml(v.destination)}</div>` : ''}
       </div>`;
-    }
 
-    html += '</div>';
+    // Add marker on map
+    if (v.lat != null && v.lon != null) {
+      const col = score >= 0.6 ? '#4caf50' : score >= 0.3 ? '#ff9800' : '#8b949e';
+      const marker = L.circleMarker([v.lat, v.lon], {
+        radius: 6, color: '#fff', weight: 1.5, fillColor: col, fillOpacity: 0.9,
+      });
+      marker.bindTooltip(`
+        <strong>${escHtml(v.name || String(v.mmsi))}</strong><br>
+        ${escHtml(v.type || '')} \u00b7 ${v.speed || 0} kts<br>
+        ${badgeText}
+      `, { sticky: true, className: 'port-tooltip' });
+      finderMarkers.addLayer(marker);
+    }
   });
 
-  content.innerHTML = html;
+  resultsEl.innerHTML = html;
+
+  // Click handler for vessel detail
+  resultsEl.querySelectorAll('.finder-vessel').forEach(el => {
+    el.addEventListener('click', () => {
+      const mmsi = el.dataset.mmsi;
+      if (mmsi) loadVesselDetail(parseInt(mmsi, 10));
+    });
+  });
+
+  // Fit map to show all vessel markers
+  if (finderMarkers.getLayers().length > 0) {
+    map.fitBounds(finderMarkers.getBounds(), { padding: [40, 40], maxZoom: 12 });
+  }
+}
+
+async function loadVesselDetail(mmsi) {
+  // Show detail in port-detail panel (reuse)
+  const panel = $('port-detail');
+  panel.classList.remove('hidden');
+  panel.classList.add('open');
+
+  $('pd-port-name').textContent = 'Loading vessel...';
+  $('pd-port-meta').textContent = `MMSI: ${mmsi}`;
+  $('pd-score-val').textContent = '\u2014';
+  $('pd-level-badge').textContent = '';
+  $('pd-level-badge').className = 'pd-level-badge';
+  $('pd-peak-anchored').textContent = '\u2014';
+  $('pd-avg-wait').textContent = '\u2014';
+  $('pd-peak-berthed').textContent = '\u2014';
+  $('pd-transitioned').textContent = '\u2014';
+  $('pd-vessel-list').innerHTML = '';
+  $('pd-state-breakdown').innerHTML = '';
+  $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading vessel detail...</div>';
+  $('pd-intelligence').innerHTML = '';
+
+  try {
+    const [detailRes, trackRes] = await Promise.all([
+      fetch(`/api/vessels/${mmsi}/detail`),
+      fetch(`/api/vessels/${mmsi}/track?days=30`),
+    ]);
+
+    const detail = detailRes.ok ? await detailRes.json() : null;
+    const track  = trackRes.ok ? await trackRes.json() : null;
+
+    if (detail) {
+      $('pd-port-name').textContent = detail.name || String(mmsi);
+      const meta = [detail.type, detail.flag, detail.imo ? `IMO: ${detail.imo}` : ''].filter(Boolean).join(' \u00b7 ');
+      $('pd-port-meta').textContent = meta || `MMSI: ${mmsi}`;
+
+      // Use metrics area for vessel specs
+      $('pd-peak-anchored').textContent = detail.dwt ? `${Number(detail.dwt).toLocaleString()} DWT` : '\u2014';
+      $('pd-avg-wait').textContent = detail.built_year || '\u2014';
+      $('pd-peak-berthed').textContent = detail.length ? `${detail.length}m` : '\u2014';
+      $('pd-transitioned').textContent = detail.beam ? `${detail.beam}m` : '\u2014';
+
+      const metricLabels = document.querySelectorAll('.pd-metric-label');
+      if (metricLabels[0]) metricLabels[0].textContent = 'Deadweight';
+      if (metricLabels[1]) metricLabels[1].textContent = 'Built';
+      if (metricLabels[2]) metricLabels[2].textContent = 'Length';
+      if (metricLabels[3]) metricLabels[3].textContent = 'Beam';
+
+      // Availability score as ring
+      const avail = detail.availability || {};
+      const score = Math.round((avail.score || 0) * 100);
+      const color = score >= 60 ? '#4caf50' : score >= 30 ? '#ff9800' : '#ef5350';
+      const circumference = 2 * Math.PI * 32;
+      const fill = $('pd-ring-fill');
+      fill.style.stroke = color;
+      fill.setAttribute('stroke-dasharray', `${circumference} ${circumference}`);
+      fill.setAttribute('stroke-dashoffset', circumference * (1 - score / 100));
+      $('pd-score-val').textContent = score;
+      $('pd-score-val').style.color = color;
+
+      const badge = $('pd-level-badge');
+      badge.textContent = score >= 60 ? 'AVAILABLE' : score >= 30 ? 'MAYBE' : 'IN USE';
+      badge.className = `pd-level-badge ${score >= 60 ? 'level-low' : score >= 30 ? 'level-moderate' : 'level-high'}`;
+    }
+
+    // Render track on map
+    if (track && track.track) {
+      if (finderTrackLayer) { finderTrackLayer.remove(); finderTrackLayer = null; }
+      const trackGeojson = L.geoJSON(track.track, {
+        style: { color: '#9c27b0', weight: 2, opacity: 0.7, dashArray: '6 4' },
+      });
+      trackGeojson.addTo(map);
+      finderTrackLayer = trackGeojson;
+      map.fitBounds(trackGeojson.getBounds(), { padding: [40, 40] });
+
+      $('pd-timeline-chart').innerHTML = '<div class="timeline-empty">30-day track shown on map</div>';
+    } else {
+      $('pd-timeline-chart').innerHTML = '<div class="timeline-empty">No track data available</div>';
+    }
+
+    $('pd-state-breakdown').innerHTML = '';
+    $('pd-vessel-list').innerHTML = '';
+
+  } catch (err) {
+    $('pd-port-name').textContent = 'Error loading vessel';
+    $('pd-port-meta').textContent = err.message;
+  }
 }
