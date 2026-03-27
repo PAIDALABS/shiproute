@@ -414,3 +414,714 @@ html, body {
 #sidebar::-webkit-scrollbar { width: 4px; }
 #sidebar::-webkit-scrollbar-track { background: transparent; }
 #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Top Navigation Bar ──────────────────────────────────────────────────── */
+#top-nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 48px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 2000;
+  gap: 16px;
+}
+
+#nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.nav-brand-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: .5px;
+}
+
+#mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.mode-btn {
+  padding: 5px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.mode-btn:hover { color: var(--text); }
+
+.mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── Adjust layout for top nav ────────────────────────────────────────────── */
+#sidebar {
+  top: 48px;
+}
+
+#map {
+  top: 48px;
+}
+
+/* ── Route/Congestion mode containers ────────────────────────────────────── */
+#route-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#congestion-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Congestion sidebar header ───────────────────────────────────────────── */
+#congestion-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Congestion controls ─────────────────────────────────────────────────── */
+#congestion-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.congestion-sort-label {
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  flex-shrink: 0;
+}
+
+.sort-btn-group {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+
+.sort-btn {
+  flex: 1;
+  padding: 4px 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text2);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.sort-btn:hover { border-color: var(--accent); color: var(--text); }
+
+.sort-btn.active {
+  background: var(--accent2);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+#congestion-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.spinner-sm {
+  width: 14px; height: 14px;
+  border-width: 2px;
+}
+
+/* ── Congestion legend ───────────────────────────────────────────────────── */
+#congestion-legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.legend-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Severity colours ────────────────────────────────────────────────────── */
+.severity-severe   { background: #ef5350; }
+.severity-high     { background: #ff9800; }
+.severity-moderate { background: #ffeb3b; }
+.severity-low      { background: #4caf50; }
+
+/* ── Port list ───────────────────────────────────────────────────────────── */
+#port-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: calc(100vh - 320px);
+}
+
+#port-list::-webkit-scrollbar { width: 4px; }
+#port-list::-webkit-scrollbar-track { background: transparent; }
+#port-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.port-list-item {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+
+.port-list-item:hover  { border-color: var(--accent); background: #1c2840; }
+.port-list-item.selected { border-color: var(--accent); background: rgba(33,150,243,.08); }
+
+.pli-stripe {
+  width: 4px;
+  flex-shrink: 0;
+}
+
+.pli-body {
+  flex: 1;
+  padding: 9px 10px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pli-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pli-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pli-score {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.pli-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.pli-country {
+  font-size: 11px;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+.pli-stats {
+  font-size: 11px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+.pli-bar-track {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pli-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .3s;
+}
+
+.cong-error, .cong-empty {
+  padding: 16px;
+  color: var(--text2);
+  font-size: 13px;
+  text-align: center;
+}
+
+.cong-error { color: var(--danger); }
+
+/* ── Port Detail Panel (right slide-in) ──────────────────────────────────── */
+#port-detail {
+  position: fixed;
+  top: 48px; right: 0; bottom: 0;
+  width: 360px;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform .3s cubic-bezier(.4, 0, .2, 1);
+}
+
+#port-detail.open {
+  transform: translateX(0);
+}
+
+#port-detail::-webkit-scrollbar { width: 4px; }
+#port-detail::-webkit-scrollbar-track { background: transparent; }
+#port-detail::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Port detail header ──────────────────────────────────────────────────── */
+.port-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.port-detail-title-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.pd-port-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pd-port-meta {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 2px;
+  font-family: monospace;
+}
+
+.pd-close-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text2);
+  font-size: 14px;
+  width: 28px; height: 28px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: all .15s;
+}
+
+.pd-close-btn:hover { border-color: var(--danger); color: var(--danger); }
+
+/* ── Score ring ──────────────────────────────────────────────────────────── */
+.pd-score-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pd-score-ring-wrap {
+  position: relative;
+  width: 80px; height: 80px;
+  flex-shrink: 0;
+}
+
+.pd-score-ring {
+  width: 80px; height: 80px;
+  transform: rotate(-90deg);
+}
+
+.ring-track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 6;
+}
+
+.ring-fill {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset .6s ease, stroke .3s;
+}
+
+.pd-score-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.pd-score-val {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pd-score-sub {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 1px;
+}
+
+.pd-level-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pd-level-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  border: 1px solid transparent;
+}
+
+.pd-level-badge.level-severe   { background: rgba(239,83,80,.15);  color: #ef5350; border-color: rgba(239,83,80,.35); }
+.pd-level-badge.level-high     { background: rgba(255,152,0,.15);  color: #ff9800; border-color: rgba(255,152,0,.35); }
+.pd-level-badge.level-moderate { background: rgba(255,235,59,.12); color: #ffeb3b; border-color: rgba(255,235,59,.3); }
+.pd-level-badge.level-low      { background: rgba(76,175,80,.12);  color: #4caf50; border-color: rgba(76,175,80,.3); }
+
+.pd-level-label {
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+/* ── Metrics grid ────────────────────────────────────────────────────────── */
+.pd-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pd-metric-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  text-align: center;
+}
+
+.pd-metric-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.pd-metric-label {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+/* ── Section titles ──────────────────────────────────────────────────────── */
+.pd-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text2);
+  padding: 12px 16px 6px;
+  flex-shrink: 0;
+}
+
+/* ── Timeline chart ──────────────────────────────────────────────────────── */
+.timeline-chart {
+  margin: 0 16px 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 4px 4px;
+  min-height: 136px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.timeline-loading,
+.timeline-empty {
+  font-size: 12px;
+  color: var(--text2);
+  text-align: center;
+  padding: 16px;
+}
+
+/* ── State breakdown ─────────────────────────────────────────────────────── */
+.pd-state-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0 16px 12px;
+  flex-shrink: 0;
+}
+
+.breakdown-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.breakdown-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.breakdown-count {
+  font-size: 12px;
+  color: var(--text2);
+  margin-left: auto;
+}
+
+.breakdown-bar-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.breakdown-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .4s;
+}
+
+/* ── State badge ─────────────────────────────────────────────────────────── */
+.state-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 8px;
+  border: 1px solid;
+  letter-spacing: .3px;
+  white-space: nowrap;
+}
+
+/* ── Vessel list ─────────────────────────────────────────────────────────── */
+.vessel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 16px;
+}
+
+.vessel-row {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vessel-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vessel-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.vessel-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vessel-type, .vessel-dist, .vessel-time {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.vessel-dist::before { content: '·'; margin-right: 6px; }
+.vessel-time::before { content: '·'; margin-right: 6px; }
+
+.vessel-empty {
+  padding: 12px 16px;
+  color: var(--text2);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ── Port tooltip (map) ──────────────────────────────────────────────────── */
+.port-tooltip {
+  background: rgba(13,17,23,.92) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  color: var(--text) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 12px !important;
+  padding: 7px 10px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5) !important;
+  pointer-events: none;
+}
+
+.port-tooltip::before { display: none !important; }
+
+/* ── Live Congestion Mode ───────────────────────────────────────────────── */
+#live-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#live-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Stream status bar ──────────────────────────────────────────────────── */
+#live-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+.live-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #ff9800;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+.live-dot.connected {
+  background: var(--success);
+  animation: none;
+}
+
+.live-dot.disconnected {
+  background: var(--danger);
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+#live-status-text {
+  color: var(--text2);
+  flex: 1;
+}
+
+.live-last-update {
+  color: var(--text2);
+  font-size: 11px;
+  font-family: monospace;
+}
+
+/* ── Live port list ─────────────────────────────────────────────────────── */
+#live-port-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: calc(100vh - 320px);
+}
+
+#live-port-list::-webkit-scrollbar { width: 4px; }
+#live-port-list::-webkit-scrollbar-track { background: transparent; }
+#live-port-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Live vessel markers ────────────────────────────────────────────────── */
+.vessel-marker-icon {
+  border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,.7);
+  box-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+
+/* ── Port pulse animation on map ────────────────────────────────────────── */
+@keyframes port-pulse {
+  0%   { transform: scale(1);   opacity: 0.8; }
+  50%  { transform: scale(1.4); opacity: 0.3; }
+  100% { transform: scale(1);   opacity: 0.8; }
+}
+
+.port-pulse-marker {
+  border-radius: 50%;
+  animation: port-pulse 2s ease-in-out infinite;
+}
+
+#congestion-legend-live {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
