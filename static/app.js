@@ -1050,7 +1050,15 @@ async function openLivePortDetail(locode) {
       map.setView([detail.lat, detail.lon], 11, { animate: true });
     }
 
-    // Load turnaround in background (slow — fetches vessel history)
+    // Load cargo and turnaround in background (slow — fetches vessel specs/history)
+    $('pd-cargo').innerHTML = '<div class="vessel-empty">Loading cargo data...</div>';
+    fetch(`/api/congestion/live/${encodeURIComponent(locode)}/cargo`)
+      .then(r => r.ok ? r.json() : null)
+      .then(cargo => renderCargoStats(cargo))
+      .catch(() => {
+        $('pd-cargo').innerHTML = '<div class="vessel-empty">Could not load cargo data.</div>';
+      });
+
     $('pd-turnaround').innerHTML = '<div class="vessel-empty">Loading turnaround data...</div>';
     fetch(`/api/congestion/live/${encodeURIComponent(locode)}/turnaround`)
       .then(r => r.ok ? r.json() : null)
@@ -1221,5 +1229,76 @@ function renderTurnaroundStats(data) {
   });
 
   html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ── Cargo estimation ─────────────────────────────────────────────────────────
+function renderCargoStats(data) {
+  const el = $('pd-cargo');
+  if (!data || !data.vessels || data.vessels.length === 0) {
+    el.innerHTML = '<div class="vessel-empty">No cargo data available.</div>';
+    return;
+  }
+
+  const s = data.summary;
+  const fmtT = t => {
+    if (t >= 1000000) return (t / 1000000).toFixed(1) + 'M';
+    if (t >= 1000) return Math.round(t / 1000) + 'K';
+    return String(t);
+  };
+
+  let html = `
+    <div class="cargo-summary">
+      <div class="cargo-stat">
+        <div class="cargo-stat-val">${fmtT(s.total_est_cargo_tonnes)} t</div>
+        <div class="cargo-stat-label">Est. Cargo</div>
+      </div>
+      <div class="cargo-stat">
+        <div class="cargo-stat-val">${fmtT(s.total_dwt)} DWT</div>
+        <div class="cargo-stat-label">Total Capacity</div>
+      </div>
+      <div class="cargo-stat">
+        <div class="cargo-stat-val">${s.avg_load_pct != null ? s.avg_load_pct + '%' : 'N/A'}</div>
+        <div class="cargo-stat-label">Avg Load</div>
+      </div>
+      <div class="cargo-stat">
+        <div class="cargo-stat-val">${data.vessels_analyzed}</div>
+        <div class="cargo-stat-label">Vessels</div>
+      </div>`;
+
+  if (s.total_teu_capacity > 0) {
+    html += `
+      <div class="cargo-stat wide">
+        <div class="cargo-stat-val">${fmtT(s.total_teu_capacity)} TEU</div>
+        <div class="cargo-stat-label">Container Capacity</div>
+      </div>`;
+  }
+
+  html += '</div>';
+
+  // Cargo breakdown by type with bars
+  if (data.by_type && data.by_type.length > 0) {
+    const maxCargo = Math.max(...data.by_type.map(t => t.total_est_cargo || 0), 1);
+    html += '<div class="cargo-bar">';
+    data.by_type.forEach(t => {
+      const pct = Math.round((t.total_est_cargo / maxCargo) * 100);
+      const colors = {
+        'Bulk Carrier': '#ff9800', 'General Cargo': '#2196f3',
+        'Tanker': '#f44336', 'Oil/Chemical Tanker': '#e91e63',
+        'Container Ship': '#4caf50', 'Cargo': '#ff9800',
+      };
+      const col = colors[t.vessel_type] || '#9c27b0';
+      html += `
+        <div class="cargo-bar-row">
+          <span class="cargo-bar-label" title="${escHtml(t.vessel_type)}">${escHtml(t.vessel_type)}</span>
+          <div class="cargo-bar-track">
+            <div class="cargo-bar-fill" style="width:${pct}%;background:${col}"></div>
+          </div>
+          <span class="cargo-bar-val">${fmtT(t.total_est_cargo)} t (${t.count})</span>
+        </div>`;
+    });
+    html += '</div>';
+  }
+
   el.innerHTML = html;
 }

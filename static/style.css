@@ -1126,6 +1126,95 @@ html, body {
   flex-wrap: wrap;
 }
 
+/* ── Cargo estimation ───────────────────────────────────────────────────── */
+.pd-cargo {
+  padding: 0 16px 12px;
+}
+
+.cargo-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.cargo-stat {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  text-align: center;
+}
+
+.cargo-stat.wide {
+  grid-column: span 2;
+}
+
+.cargo-stat-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ff9800;
+}
+
+.cargo-stat-label {
+  font-size: 9px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  margin-top: 2px;
+}
+
+.cargo-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.cargo-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.cargo-bar-label {
+  min-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.cargo-bar-track {
+  flex: 1;
+  height: 14px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.cargo-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #ff9800;
+  transition: width .4s;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+}
+
+.cargo-bar-val {
+  font-size: 10px;
+  color: var(--text2);
+  white-space: nowrap;
+  min-width: 50px;
+  text-align: right;
+}
+
 /* ── Turnaround stats table ─────────────────────────────────────────────── */
 .pd-turnaround {
   padding: 0 16px 12px;

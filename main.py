@@ -174,6 +174,137 @@ def get_live_port_detail(locode: str):
     return detail
 
 
+@app.get("/api/congestion/live/{locode}/cargo")
+async def get_live_cargo(locode: str):
+    """Return cargo estimates for vessels in port using Datalastic vessel specs."""
+    from ais_stream import DATALASTIC_API_KEY
+    import httpx
+
+    locode_upper = locode.upper()
+    port_detail = engine.get_port_detail(locode_upper)
+    if not port_detail:
+        raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
+
+    vessels = port_detail.get("vessels", [])
+    if not vessels or not DATALASTIC_API_KEY:
+        return {"locode": locode_upper, "vessels": [], "summary": {}, "by_type": []}
+
+    # Fetch specs for berthed + anchored vessels (up to 30)
+    target_vessels = [
+        v for v in vessels if v.get("state") in ("BERTHED", "ANCHORED")
+    ][:30]
+
+    cargo_vessels = []
+    async with httpx.AsyncClient() as client:
+        for v in target_vessels:
+            mmsi = v.get("mmsi")
+            if not mmsi:
+                continue
+            try:
+                resp = await client.get(
+                    "https://api.datalastic.com/api/v0/vessel_info",
+                    params={"api-key": DATALASTIC_API_KEY, "mmsi": mmsi},
+                    timeout=10,
+                )
+                if resp.status_code != 200:
+                    continue
+                info = resp.json().get("data", {})
+                if not info:
+                    continue
+
+                def _num(v):
+                    try: return float(v) if v else 0
+                    except (TypeError, ValueError): return 0
+
+                dwt = _num(info.get("deadweight"))
+                draught_avg = _num(info.get("draught_avg"))
+                draught_max = _num(info.get("draught_max"))
+                gt = _num(info.get("gross_tonnage"))
+                teu = int(_num(info.get("teu")))
+                liquid_gas = int(_num(info.get("liquid_gas")))
+
+                # Estimate load percentage from draught
+                if draught_max > 0 and draught_avg > 0:
+                    load_pct = round(min(draught_avg / draught_max, 1.0) * 100, 1)
+                else:
+                    load_pct = None
+
+                # Estimate cargo tonnage
+                if dwt > 0 and load_pct is not None:
+                    est_cargo_tonnes = round(dwt * load_pct / 100)
+                else:
+                    est_cargo_tonnes = None
+
+                cargo_vessels.append({
+                    "mmsi": mmsi,
+                    "name": info.get("name") or v.get("name"),
+                    "type": info.get("type"),
+                    "type_specific": info.get("type_specific"),
+                    "state": v.get("state"),
+                    "country": info.get("country_name"),
+                    "flag": info.get("country_iso"),
+                    "imo": info.get("imo"),
+                    "deadweight": dwt,
+                    "gross_tonnage": gt,
+                    "teu_capacity": teu,
+                    "liquid_gas_capacity": liquid_gas,
+                    "length": info.get("length"),
+                    "breadth": info.get("breadth"),
+                    "draught_current": draught_avg,
+                    "draught_max": draught_max,
+                    "load_pct": load_pct,
+                    "est_cargo_tonnes": est_cargo_tonnes,
+                    "destination": v.get("name"),
+                    "year_built": info.get("year_built"),
+                })
+                await asyncio.sleep(0.2)  # rate limit
+            except Exception:
+                continue
+
+    # Aggregate by vessel type
+    type_groups: dict[str, list] = {}
+    for cv in cargo_vessels:
+        vtype = cv["type_specific"] or cv["type"] or "Unknown"
+        type_groups.setdefault(vtype, []).append(cv)
+
+    by_type = []
+    for vtype, group in sorted(type_groups.items(), key=lambda x: -len(x[1])):
+        dwts = [g["deadweight"] for g in group if g["deadweight"]]
+        cargos = [g["est_cargo_tonnes"] for g in group if g["est_cargo_tonnes"]]
+        loads = [g["load_pct"] for g in group if g["load_pct"] is not None]
+        by_type.append({
+            "vessel_type": vtype,
+            "count": len(group),
+            "total_dwt": sum(dwts),
+            "total_est_cargo": sum(cargos),
+            "avg_load_pct": round(sum(loads) / len(loads), 1) if loads else None,
+            "avg_dwt": round(sum(dwts) / len(dwts)) if dwts else 0,
+        })
+
+    # Port-level summary
+    all_dwt = sum(cv["deadweight"] for cv in cargo_vessels if cv["deadweight"])
+    all_cargo = sum(cv["est_cargo_tonnes"] for cv in cargo_vessels if cv["est_cargo_tonnes"])
+    all_loads = [cv["load_pct"] for cv in cargo_vessels if cv["load_pct"] is not None]
+    all_teu = sum(cv["teu_capacity"] for cv in cargo_vessels if cv["teu_capacity"])
+
+    from congestion_engine import MONITORED_PORTS
+    port_def = MONITORED_PORTS.get(locode_upper, {})
+
+    return {
+        "locode": locode_upper,
+        "name": port_def.get("name", locode_upper),
+        "vessels_analyzed": len(cargo_vessels),
+        "summary": {
+            "total_dwt": all_dwt,
+            "total_est_cargo_tonnes": all_cargo,
+            "total_teu_capacity": all_teu,
+            "avg_load_pct": round(sum(all_loads) / len(all_loads), 1) if all_loads else None,
+        },
+        "by_type": by_type,
+        "vessels": cargo_vessels,
+    }
+
+
 @app.get("/api/congestion/live/{locode}/turnaround")
 async def get_live_turnaround(locode: str):
     """Return turnaround time stats by vessel type using Datalastic history."""
