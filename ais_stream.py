@@ -1,204 +1,174 @@
 """
-AIS Stream WebSocket client.
+Datalastic REST API client for live vessel tracking.
 
-Connects to wss://stream.aisstream.io/v0/stream, subscribes to bounding
-boxes around the monitored ports, parses incoming AIS messages, and feeds
-them into the CongestionEngine.
+Periodically polls the vessel_inradius endpoint for each monitored port
+and feeds vessel positions into the CongestionEngine.
 """
 
 import asyncio
-import json
 import logging
 import os
 import time
 
-import websockets
+import httpx
 
 from congestion_engine import CongestionEngine, MONITORED_PORTS
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ais_stream")
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-AIS_STREAM_URL = "wss://stream.aisstream.io/v0/stream"
-AIS_STREAM_API_KEY = os.getenv("AIS_STREAM_API_KEY", "")
+DATALASTIC_API_KEY = os.getenv("DATALASTIC_API_KEY", "")
+DATALASTIC_BASE_URL = "https://api.datalastic.com/api/v0/vessel_inradius"
 
+# Poll every 2 minutes (balance between freshness and API credits)
+POLL_INTERVAL_SECONDS = 120
 PRUNE_INTERVAL_SECONDS = 300  # 5 minutes
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Parse Datalastic vessel into engine format
 # ---------------------------------------------------------------------------
 
-
-def _build_bbox_list() -> list[list[list[float]]]:
-    """Build list of bounding boxes from MONITORED_PORTS for subscription.
-
-    Each bbox is [[south, west], [north, east]].
-    """
-    bboxes = []
-    for port in MONITORED_PORTS.values():
-        bboxes.append(port["bbox"])
-    return bboxes
-
-
-def _build_subscription_message() -> str:
-    """Return the JSON subscription message for AIS Stream."""
-    payload = {
-        "APIKey": AIS_STREAM_API_KEY,
-        "BoundingBoxes": _build_bbox_list(),
-        "FilterMessageTypes": [
-            "PositionReport",
-            "ShipStaticData",
-            "StandardClassBPositionReport",
-        ],
-    }
-    return json.dumps(payload)
-
-
-def _parse_ais_message(msg: dict) -> dict | None:
-    """Extract vessel data from an AIS Stream message.
-
-    Returns a dict with keys: mmsi, lat, lon, speed, course, heading,
-    nav_status, ship_type, name, timestamp.
-    Returns None if the message cannot be parsed.
-    """
+def _parse_vessel(vessel: dict) -> dict | None:
+    """Convert a Datalastic vessel dict into CongestionEngine update params."""
     try:
-        meta = msg["MetaData"]
-        mmsi = int(meta["MMSI"])
-        lat = float(meta["latitude"])
-        lon = float(meta["longitude"])
-        name = meta.get("ShipName", "").strip() or None
+        mmsi = int(vessel.get("mmsi", 0))
+        if mmsi == 0:
+            return None
 
-        message_type = msg.get("MessageType", "")
-
-        speed = 0.0
-        course = 0.0
-        heading = 0
-        nav_status = None
-        ship_type = None
-
-        if message_type == "PositionReport":
-            report = msg["Message"]["PositionReport"]
-            speed = float(report.get("Sog", 0))
-            course = float(report.get("Cog", 0))
-            heading = int(report.get("TrueHeading", 0))
-            nav_status = report.get("NavigationalStatus")
-
-        elif message_type == "StandardClassBPositionReport":
-            report = msg["Message"]["StandardClassBPositionReport"]
-            speed = float(report.get("Sog", 0))
-            course = float(report.get("Cog", 0))
-            heading = int(report.get("TrueHeading", 0))
-
-        elif message_type == "ShipStaticData":
-            static = msg["Message"]["ShipStaticData"]
-            ship_type = static.get("Type")
-            speed = 0.0
-            course = 0.0
-            heading = 0
-
-        else:
+        lat = vessel.get("lat")
+        lon = vessel.get("lon")
+        if lat is None or lon is None:
             return None
 
         return {
             "mmsi": mmsi,
-            "lat": lat,
-            "lon": lon,
-            "speed": speed,
-            "course": course,
-            "heading": heading,
-            "nav_status": nav_status,
-            "ship_type": ship_type,
-            "name": name,
+            "lat": float(lat),
+            "lon": float(lon),
+            "speed": float(vessel.get("speed", 0) or 0),
+            "course": float(vessel.get("course", 0) or 0),
+            "heading": int(vessel.get("heading", 0) or 0),
+            "nav_status": None,  # Datalastic doesn't provide nav_status directly
+            "ship_type": vessel.get("type"),
+            "name": (vessel.get("name") or "").strip() or None,
             "timestamp": time.time(),
         }
-
-    except (KeyError, TypeError, ValueError) as exc:
-        logger.debug("Failed to parse AIS message: %s", exc)
+    except (TypeError, ValueError) as exc:
+        logger.debug("Failed to parse vessel: %s", exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Fetch vessels for one port
+# ---------------------------------------------------------------------------
+
+async def _fetch_port_vessels(
+    client: httpx.AsyncClient,
+    locode: str,
+    port_def: dict,
+) -> list[dict]:
+    """Fetch vessels near a port from Datalastic API."""
+    # Calculate radius from bbox (approximate nm)
+    bbox = port_def["bbox"]
+    dlat = bbox[1][0] - bbox[0][0]  # north - south in degrees
+    radius_nm = round(dlat * 60 / 2, 1)  # convert back to approximate nm
+
+    params = {
+        "api-key": DATALASTIC_API_KEY,
+        "lat": port_def["lat"],
+        "lon": port_def["lon"],
+        "radius": radius_nm,
+    }
+
+    try:
+        resp = await client.get(DATALASTIC_BASE_URL, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        vessels_raw = data.get("data", {}).get("vessels", [])
+        total = data.get("data", {}).get("total", 0)
+
+        if total > 0:
+            logger.info(
+                "  %s (%s): %d vessels found", port_def["name"], locode, total
+            )
+
+        return vessels_raw
+
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Datalastic HTTP error for %s: %s", locode, exc)
+        return []
+    except Exception as exc:
+        logger.warning("Datalastic request failed for %s: %s", locode, exc)
+        return []
 
 
 # ---------------------------------------------------------------------------
 # Main async loop
 # ---------------------------------------------------------------------------
 
-
 async def run_ais_stream(engine: CongestionEngine) -> None:
-    """Connect to AIS Stream and feed vessel updates into the engine.
+    """Poll Datalastic API for all monitored ports on a regular interval.
 
-    Reconnects automatically with exponential backoff on failure.
+    Despite the function name (kept for compatibility), this now uses
+    Datalastic REST polling instead of AIS Stream WebSocket.
     """
-    backoff = 1.0
-
     while True:
-        # Guard: no API key
-        if not AIS_STREAM_API_KEY:
+        if not DATALASTIC_API_KEY:
             logger.warning(
-                "AIS_STREAM_API_KEY not set — cannot connect. Retrying in 60s."
+                "DATALASTIC_API_KEY not set — cannot fetch data. Retrying in 60s."
             )
             await asyncio.sleep(60)
             continue
 
         try:
-            logger.info("Connecting to AIS Stream at %s …", AIS_STREAM_URL)
-            async with websockets.connect(AIS_STREAM_URL) as ws:
-                # Send subscription
-                await ws.send(_build_subscription_message())
-                logger.info("Subscribed to %d port bounding boxes.", len(MONITORED_PORTS))
+            engine.stream_connected = True
+            engine.connected_since = engine.connected_since or time.time()
 
-                # Mark engine as connected
-                engine.stream_connected = True
-                engine.connected_since = time.time()
+            async with httpx.AsyncClient() as client:
+                while True:
+                    logger.info("Polling Datalastic for %d ports...", len(MONITORED_PORTS))
+                    total_vessels = 0
 
-                # Reset backoff on successful connection
-                backoff = 1.0
+                    for locode, port_def in MONITORED_PORTS.items():
+                        vessels_raw = await _fetch_port_vessels(client, locode, port_def)
 
-                last_prune = time.time()
+                        for v in vessels_raw:
+                            parsed = _parse_vessel(v)
+                            if parsed:
+                                engine.update_vessel(**parsed)
+                                engine.messages_received += 1
+                                engine.last_message_at = time.time()
+                                total_vessels += 1
 
-                async for raw in ws:
-                    try:
-                        msg = json.loads(raw)
-                    except json.JSONDecodeError:
-                        logger.debug("Non-JSON message received, skipping.")
-                        continue
+                        # Small delay between ports to be nice to the API
+                        await asyncio.sleep(0.5)
 
-                    parsed = _parse_ais_message(msg)
-                    if parsed is not None:
-                        engine.update_vessel(**parsed)
-                        engine.messages_received += 1
-                        engine.last_message_at = time.time()
+                    logger.info(
+                        "Poll complete: %d vessels ingested across %d ports.",
+                        total_vessels, len(MONITORED_PORTS),
+                    )
 
-                    # Periodic prune
-                    now = time.time()
-                    if now - last_prune >= PRUNE_INTERVAL_SECONDS:
-                        pruned = engine.prune_stale_vessels()
-                        if pruned:
-                            logger.info("Pruned %d stale vessels.", pruned)
-                        last_prune = now
+                    # Prune stale vessels
+                    pruned = engine.prune_stale_vessels()
+                    if pruned:
+                        logger.info("Pruned %d stale vessels.", pruned)
 
-        except (
-            websockets.ConnectionClosed,
-            ConnectionError,
-            OSError,
-        ) as exc:
-            logger.warning("AIS Stream connection lost: %s", exc)
+                    # Wait for next poll cycle
+                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
         except asyncio.CancelledError:
-            logger.info("AIS Stream task cancelled.")
+            logger.info("Datalastic polling task cancelled.")
             engine.stream_connected = False
             engine.connected_since = None
             raise
 
         except Exception:
-            logger.exception("Unexpected error in AIS Stream loop.")
-
-        # Mark disconnected and back off
-        engine.stream_connected = False
-        engine.connected_since = None
-
-        logger.info("Reconnecting in %.0fs …", backoff)
-        await asyncio.sleep(backoff)
-        backoff = min(backoff * 2, 60.0)
+            logger.exception("Unexpected error in Datalastic polling loop.")
+            engine.stream_connected = False
+            engine.connected_since = None
+            logger.info("Retrying in 30s...")
+            await asyncio.sleep(30)

@@ -2,4 +2,4 @@ fastapi
 uvicorn[standard]
 searoute
 psycopg2-binary
-websockets
+httpx
