@@ -16,6 +16,8 @@ from ports_loader import PortsLoader
 from congestion_engine import CongestionEngine
 from ais_stream import run_ais_stream
 from cargo_flow import compute_cargo_flow, compute_all_ports_flow, save_daily_snapshot
+from voyage_planner import calculate_multi_leg, estimate_fuel_cost
+from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track
 
 # ── Database connection ───────────────────────────────────────────────────────
 
@@ -162,6 +164,90 @@ async def get_port_cargo_flow(locode: str):
     if not flow:
         raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
     return flow
+
+
+# ── Multi-leg Route Planning ─────────────────────────────────────────────
+
+class MultiRouteRequest(BaseModel):
+    waypoints: List[dict]  # [{lat, lon, name?}, ...]
+    speed_knots: float = 14.0
+
+@app.post("/api/route/multi")
+def calculate_multi_route(req: MultiRouteRequest):
+    """Calculate multi-leg sea route."""
+    # Resolve port IDs to coordinates
+    resolved = []
+    for wp in req.waypoints:
+        if "port_id" in wp and wp["port_id"]:
+            p = ports.get(wp["port_id"])
+            if not p:
+                raise HTTPException(404, f"Port not found: {wp['port_id']}")
+            resolved.append({"lat": p["lat"], "lon": p["lon"], "name": p["name"]})
+        elif "lat" in wp and "lon" in wp:
+            resolved.append({"lat": wp["lat"], "lon": wp["lon"], "name": wp.get("name", "")})
+        else:
+            raise HTTPException(422, "Each waypoint needs port_id or lat/lon")
+
+    result = calculate_multi_leg(resolved, req.speed_knots)
+    if "error" in result:
+        raise HTTPException(500, result["error"])
+    return result
+
+
+# ── Vessel Finder ────────────────────────────────────────────────────────
+
+@app.get("/api/vessels/search")
+async def api_vessel_search(
+    locode: str = Query(default=""),
+    lat: float = Query(default=None),
+    lon: float = Query(default=None),
+    radius: float = Query(default=15),
+    type: str = Query(default=""),
+    idle_only: bool = Query(default=False),
+    africa_only: bool = Query(default=False),
+):
+    """Search vessels near a port or coordinates."""
+    from ais_stream import DATALASTIC_API_KEY
+    if not DATALASTIC_API_KEY:
+        raise HTTPException(503, "API key not configured")
+
+    # Resolve port locode to coordinates
+    if locode and not (lat and lon):
+        p = ports.get(locode)
+        if not p:
+            raise HTTPException(404, f"Port not found: {locode}")
+        lat, lon = p["lat"], p["lon"]
+
+    if lat is None or lon is None:
+        raise HTTPException(422, "Provide locode or lat/lon")
+
+    result = await search_vessels(
+        DATALASTIC_API_KEY, lat, lon, radius,
+        vessel_type=type or None,
+        idle_only=idle_only,
+        africa_only=africa_only,
+    )
+    return result
+
+
+@app.get("/api/vessels/{mmsi}/detail")
+async def api_vessel_detail(mmsi: int):
+    """Get vessel specifications and availability."""
+    from ais_stream import DATALASTIC_API_KEY
+    info = await get_vessel_detail(DATALASTIC_API_KEY, mmsi)
+    if not info:
+        raise HTTPException(404, "Vessel not found")
+    return info
+
+
+@app.get("/api/vessels/{mmsi}/track")
+async def api_vessel_track(mmsi: int, days: int = Query(default=30, le=30)):
+    """Get vessel 30-day position history with GeoJSON track."""
+    from ais_stream import DATALASTIC_API_KEY
+    track = await get_vessel_track(DATALASTIC_API_KEY, mmsi, days)
+    if not track:
+        raise HTTPException(404, "No track data")
+    return track
 
 
 # ── Live Port Congestion ──────────────────────────────────────────────────────
