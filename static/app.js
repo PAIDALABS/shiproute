@@ -14,8 +14,8 @@ const state = {
   destination: { mode: 'port', point: null },
 };
 
-let routeLayer   = null;
-let markersLayer = null;
+let routeLayer    = null;
+let markersLayer  = null;
 let lastRouteData = null;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
@@ -426,3 +426,737 @@ function hideError()       { ui.errorBox.classList.add('hidden'); }
 function showStats()       { ui.statsPanel.classList.remove('hidden'); }
 function hideStats()       { ui.statsPanel.classList.add('hidden'); }
 function showLoading(on)   { ui.loading.classList.toggle('hidden', !on); ui.calcBtn.disabled = on; }
+
+
+// ── App Mode ──────────────────────────────────────────────────────────────
+let appMode           = 'route';   // 'route' | 'congestion'
+let congestionData    = null;      // cached /api/congestion/v2 response
+let portMarkers       = L.featureGroup().addTo(map);
+let selectedPortLocode = null;
+let currentSortKey    = 'score';
+
+function switchMode(mode) {
+  const routeEl   = $('route-mode');
+  const congEl    = $('congestion-mode');
+  const liveEl    = $('live-mode');
+  const btnRoute  = $('btn-route-mode');
+  const btnCong   = $('btn-congestion-mode');
+  const btnLive   = $('btn-live-mode');
+
+  // Stop live polling when leaving live mode
+  if (livePollingTimer) {
+    clearInterval(livePollingTimer);
+    livePollingTimer = null;
+  }
+  liveVesselMarkers.clearLayers();
+  livePortMarkers.clearLayers();
+
+  appMode = mode;
+
+  // Reset all
+  routeEl.classList.add('hidden');
+  congEl.classList.add('hidden');
+  liveEl.classList.add('hidden');
+  btnRoute.classList.remove('active');
+  btnCong.classList.remove('active');
+  btnLive.classList.remove('active');
+
+  // Remove map layers
+  portMarkers.clearLayers();
+  closePortDetail();
+  if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
+  if (markersLayer) { markersLayer.remove(); markersLayer = null; }
+
+  if (mode === 'route') {
+    routeEl.classList.remove('hidden');
+    btnRoute.classList.add('active');
+  } else if (mode === 'congestion') {
+    congEl.classList.remove('hidden');
+    btnCong.classList.add('active');
+    loadCongestionData();
+  } else if (mode === 'live') {
+    liveEl.classList.remove('hidden');
+    btnLive.classList.add('active');
+    liveVesselMarkers.addTo(map);
+    livePortMarkers.addTo(map);
+    loadLiveData();
+    livePollingTimer = setInterval(loadLiveData, LIVE_POLL_INTERVAL);
+  }
+}
+
+// ── Sort buttons ────────────────────────────────────────────────────────────
+document.querySelectorAll('.sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentSortKey = btn.dataset.sort;
+    if (congestionData) {
+      const sorted = sortPorts(congestionData.ports, currentSortKey);
+      renderPortList(sorted);
+    }
+  });
+});
+
+function sortPorts(ports, key) {
+  const copy = [...ports];
+  if (key === 'score') return copy.sort((a, b) => b.congestion_score - a.congestion_score);
+  if (key === 'wait')  return copy.sort((a, b) => b.avg_actual_wait_hrs - a.avg_actual_wait_hrs);
+  if (key === 'queue') return copy.sort((a, b) => b.peak_anchored - a.peak_anchored);
+  return copy;
+}
+
+// ── Congestion data ───────────────────────────────────────────────────────
+async function loadCongestionData() {
+  const loadingEl = $('congestion-loading');
+  loadingEl.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/congestion/v2');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    congestionData = await res.json();
+
+    const sorted = sortPorts(congestionData.ports, currentSortKey);
+    renderPortMarkers(sorted);
+    renderPortList(sorted);
+  } catch (err) {
+    $('port-list').innerHTML = `<div class="cong-error">Failed to load congestion data: ${escHtml(err.message)}</div>`;
+  } finally {
+    loadingEl.classList.add('hidden');
+  }
+}
+
+// ── Congestion level helpers ───────────────────────────────────────────────
+const LEVEL_COLORS = {
+  SEVERE:   '#ef5350',
+  HIGH:     '#ff9800',
+  MODERATE: '#ffeb3b',
+  LOW:      '#4caf50',
+};
+
+function levelColor(level) {
+  return LEVEL_COLORS[level] || '#4caf50';
+}
+
+function levelClass(level) {
+  return `severity-${(level || 'low').toLowerCase()}`;
+}
+
+// ── Port markers on map ────────────────────────────────────────────────────
+function renderPortMarkers(ports) {
+  portMarkers.clearLayers();
+
+  ports.forEach(port => {
+    if (port.lat == null || port.lon == null) return;
+
+    const score   = Number(port.congestion_score) || 0;
+    const anchored = Number(port.peak_anchored) || 0;
+    const radius  = Math.max(5, Math.min(35, 5 + anchored * 1.5));
+    const color   = levelColor(port.congestion_level);
+
+    const circle = L.circleMarker([port.lat, port.lon], {
+      radius,
+      color,
+      weight:      2,
+      opacity:     0.9,
+      fillColor:   color,
+      fillOpacity: 0.35,
+    });
+
+    circle.bindTooltip(`
+      <strong>${escHtml(port.name)}</strong><br>
+      ${escHtml(port.port_locode)} · ${escHtml(port.country || '')}<br>
+      Score: <strong>${score}</strong> · ${escHtml(port.congestion_level || 'LOW')}
+    `, { sticky: true, className: 'port-tooltip' });
+
+    circle.on('click', () => openPortDetail(port.port_locode));
+
+    portMarkers.addLayer(circle);
+  });
+}
+
+// ── Port list in sidebar ───────────────────────────────────────────────────
+function renderPortList(ports) {
+  const listEl = $('port-list');
+  if (!ports || ports.length === 0) {
+    listEl.innerHTML = '<div class="cong-empty">No port data available.</div>';
+    return;
+  }
+
+  listEl.innerHTML = '';
+  ports.forEach(port => {
+    const score    = Number(port.congestion_score) || 0;
+    const anchored = Number(port.peak_anchored) || 0;
+    const wait     = Number(port.avg_actual_wait_hrs) || 0;
+    const level    = port.congestion_level || 'LOW';
+    const color    = levelColor(level);
+
+    const item = document.createElement('div');
+    item.className = `port-list-item ${selectedPortLocode === port.port_locode ? 'selected' : ''}`;
+    item.dataset.locode = port.port_locode;
+    item.innerHTML = `
+      <div class="pli-stripe ${levelClass(level)}"></div>
+      <div class="pli-body">
+        <div class="pli-top">
+          <div class="pli-name">${escHtml(port.name)}</div>
+          <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${score}</div>
+        </div>
+        <div class="pli-sub">
+          <span class="pli-country">${escHtml(port.country || '')} · ${escHtml(port.port_locode)}</span>
+          <span class="pli-stats">⚓ ${anchored} peak · ${wait > 0 ? wait.toFixed(1) + 'h wait' : 'no wait data'}</span>
+        </div>
+        <div class="pli-bar-track">
+          <div class="pli-bar-fill" style="width:${score}%;background:${color}"></div>
+        </div>
+      </div>
+    `;
+    item.addEventListener('click', () => openPortDetail(port.port_locode));
+    listEl.appendChild(item);
+  });
+}
+
+// ── Port detail panel ──────────────────────────────────────────────────────
+async function openPortDetail(locode) {
+  selectedPortLocode = locode;
+
+  // Highlight selected item in list
+  document.querySelectorAll('.port-list-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.locode === locode);
+  });
+
+  // Show panel immediately with loading state
+  const panel = $('port-detail');
+  panel.classList.remove('hidden');
+  panel.classList.add('open');
+
+  $('pd-port-name').textContent = 'Loading…';
+  $('pd-port-meta').textContent = '';
+  $('pd-score-val').textContent = '—';
+  $('pd-level-badge').textContent = '—';
+  $('pd-level-badge').className = 'pd-level-badge';
+  $('pd-peak-anchored').textContent = '—';
+  $('pd-avg-wait').textContent = '—';
+  $('pd-peak-berthed').textContent = '—';
+  $('pd-transitioned').textContent = '—';
+  $('pd-vessel-list').innerHTML = '';
+  $('pd-state-breakdown').innerHTML = '';
+  $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading chart…</div>';
+
+  try {
+    // Fetch port detail and timeline in parallel
+    const [detailRes, timelineRes] = await Promise.all([
+      fetch(`/api/congestion/v2/${encodeURIComponent(locode)}`),
+      fetch(`/api/congestion/${encodeURIComponent(locode)}/timeline`),
+    ]);
+
+    if (!detailRes.ok) throw new Error(`Port detail: HTTP ${detailRes.status}`);
+    const detail   = await detailRes.json();
+    const timeline = timelineRes.ok ? await timelineRes.json() : { timeline: [] };
+
+    renderPortDetail(detail, timeline);
+
+    // Pan map to port
+    if (detail.summary.lat != null && detail.summary.lon != null) {
+      map.panTo([detail.summary.lat, detail.summary.lon], { animate: true });
+    }
+  } catch (err) {
+    $('pd-port-name').textContent = 'Error loading port';
+    $('pd-port-meta').textContent = err.message;
+  }
+}
+
+function closePortDetail() {
+  selectedPortLocode = null;
+  const panel = $('port-detail');
+  panel.classList.remove('open');
+  // Wait for transition then hide
+  setTimeout(() => {
+    if (!panel.classList.contains('open')) {
+      panel.classList.add('hidden');
+    }
+  }, 300);
+  document.querySelectorAll('.port-list-item').forEach(el => el.classList.remove('selected'));
+}
+
+function renderPortDetail(detail, timeline) {
+  const s     = detail.summary;
+  const level = s.congestion_level || 'LOW';
+  const score = Number(s.congestion_score) || 0;
+  const color = levelColor(level);
+
+  // Header
+  $('pd-port-name').textContent = s.name || s.port_locode;
+  $('pd-port-meta').textContent = `${s.port_locode} · ${s.country || ''}`;
+
+  // Score ring
+  const circumference = 2 * Math.PI * 32; // r=32
+  const fill = $('pd-ring-fill');
+  fill.style.stroke = color;
+  const offset = circumference * (1 - score / 100);
+  fill.setAttribute('stroke-dasharray', `${circumference} ${circumference}`);
+  fill.setAttribute('stroke-dashoffset', offset);
+
+  $('pd-score-val').textContent = score;
+  $('pd-score-val').style.color = color;
+
+  const badge = $('pd-level-badge');
+  badge.textContent = level;
+  badge.className   = `pd-level-badge level-${level.toLowerCase()}`;
+
+  // Metrics
+  $('pd-peak-anchored').textContent  = Number(s.peak_anchored) || 0;
+  const wait = Number(s.avg_actual_wait_hrs);
+  $('pd-avg-wait').textContent       = wait > 0 ? wait.toFixed(1) + 'h' : 'N/A';
+  $('pd-peak-berthed').textContent   = Number(s.peak_berthed) || 0;
+  $('pd-transitioned').textContent   = Number(s.vessels_transitioned) || 0;
+
+  // Timeline chart
+  drawTimelineChart('pd-timeline-chart', timeline.timeline || []);
+
+  // State breakdown
+  renderStateBreakdown(detail.breakdown || [], detail.vessels || []);
+
+  // Vessel list
+  renderVesselList(detail.vessels || []);
+}
+
+function renderStateBreakdown(breakdown, vessels) {
+  const el = $('pd-state-breakdown');
+
+  // Count vessels per state from the last-seen vessel list
+  const stateCounts = {};
+  vessels.forEach(v => {
+    stateCounts[v.state] = (stateCounts[v.state] || 0) + 1;
+  });
+
+  const states = ['ANCHORED', 'BERTHED', 'APPROACHING', 'MANEUVERING', 'TRANSITING'];
+  const stateColors = {
+    ANCHORED:    '#ff9800',
+    BERTHED:     '#2196f3',
+    APPROACHING: '#9c27b0',
+    MANEUVERING: '#00bcd4',
+    TRANSITING:  '#4caf50',
+  };
+
+  const total = vessels.length || 1;
+  el.innerHTML = states.map(st => {
+    const count = stateCounts[st] || 0;
+    const pct   = Math.round((count / total) * 100);
+    const col   = stateColors[st] || '#8b949e';
+    return `
+      <div class="breakdown-row">
+        <div class="breakdown-label">
+          <span class="state-badge" style="background:${col}20;color:${col};border-color:${col}40">${st}</span>
+          <span class="breakdown-count">${count}</span>
+        </div>
+        <div class="breakdown-bar-track">
+          <div class="breakdown-bar-fill" style="width:${pct}%;background:${col}"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderVesselList(vessels) {
+  const el = $('pd-vessel-list');
+  if (!vessels.length) {
+    el.innerHTML = '<div class="vessel-empty">No recent vessel data.</div>';
+    return;
+  }
+
+  const stateColors = {
+    ANCHORED:    '#ff9800',
+    BERTHED:     '#2196f3',
+    APPROACHING: '#9c27b0',
+    MANEUVERING: '#00bcd4',
+    TRANSITING:  '#4caf50',
+  };
+
+  el.innerHTML = vessels.map(v => {
+    const col      = stateColors[v.state] || '#8b949e';
+    const lastSeen = v.last_seen ? new Date(v.last_seen).toLocaleDateString() : '—';
+    const distStr  = v.dist_nm != null ? `${v.dist_nm} nm` : '';
+    return `
+      <div class="vessel-row">
+        <div class="vessel-row-top">
+          <span class="vessel-name">${escHtml(v.name || v.imo || '—')}</span>
+          <span class="state-badge" style="background:${col}20;color:${col};border-color:${col}40">${v.state}</span>
+        </div>
+        <div class="vessel-row-sub">
+          <span class="vessel-type">${escHtml(v.vessel_type || '—')}</span>
+          ${distStr ? `<span class="vessel-dist">${escHtml(distStr)}</span>` : ''}
+          <span class="vessel-time">${lastSeen}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── SVG Timeline chart ─────────────────────────────────────────────────────
+function drawTimelineChart(containerId, timelineData) {
+  const container = $(containerId);
+
+  if (!timelineData || timelineData.length < 2) {
+    container.innerHTML = '<div class="timeline-empty">Not enough data for chart.</div>';
+    return;
+  }
+
+  const W = container.clientWidth || 320;
+  const H = 120;
+  const PAD = { top: 10, right: 12, bottom: 28, left: 30 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+
+  // Parse data
+  const points = timelineData.map(d => ({
+    t:        new Date(d.time).getTime(),
+    anchored: Number(d.anchored) || 0,
+    berthed:  Number(d.berthed)  || 0,
+  }));
+
+  const minT    = points[0].t;
+  const maxT    = points[points.length - 1].t;
+  const maxVal  = Math.max(1, ...points.map(p => Math.max(p.anchored, p.berthed)));
+  const tRange  = maxT - minT || 1;
+
+  function xp(t)   { return PAD.left + ((t - minT) / tRange) * chartW; }
+  function yp(v)   { return PAD.top  + chartH - (v / maxVal) * chartH; }
+
+  function makePath(key) {
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xp(p.t).toFixed(1)},${yp(p[key]).toFixed(1)}`).join(' ');
+  }
+
+  function makeAreaPath(key) {
+    const base = PAD.top + chartH;
+    const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xp(p.t).toFixed(1)},${yp(p[key]).toFixed(1)}`).join(' ');
+    const close = `L${xp(maxT).toFixed(1)},${base} L${xp(minT).toFixed(1)},${base} Z`;
+    return line + ' ' + close;
+  }
+
+  // Y-axis ticks
+  const yTicks = [0, Math.ceil(maxVal / 2), maxVal];
+  const yTickLines = yTicks.map(v => {
+    const y = yp(v).toFixed(1);
+    return `
+      <line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}"
+            stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="${PAD.left - 4}" y="${y}" text-anchor="end" dominant-baseline="middle"
+            fill="#8b949e" font-size="9">${v}</text>`;
+  }).join('');
+
+  // X-axis labels (up to 4 ticks)
+  const xTickCount = Math.min(4, points.length);
+  const xTickIdxs  = Array.from({ length: xTickCount }, (_, i) =>
+    Math.round(i * (points.length - 1) / (xTickCount - 1)));
+  const xTickLines = xTickIdxs.map(idx => {
+    const p   = points[idx];
+    const x   = xp(p.t).toFixed(1);
+    const lbl = new Date(p.t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return `
+      <line x1="${x}" y1="${PAD.top}" x2="${x}" y2="${PAD.top + chartH}"
+            stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="${x}" y="${H - 6}" text-anchor="middle" fill="#8b949e" font-size="9">${lbl}</text>`;
+  }).join('');
+
+  const svgId = `svg-${containerId}`;
+  const svg = `
+    <svg id="${svgId}" width="100%" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="grad-anchored-${containerId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ff9800" stop-opacity="0.4"/>
+          <stop offset="100%" stop-color="#ff9800" stop-opacity="0.02"/>
+        </linearGradient>
+        <linearGradient id="grad-berthed-${containerId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2196f3" stop-opacity="0.3"/>
+          <stop offset="100%" stop-color="#2196f3" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+
+      <!-- Grid -->
+      ${yTickLines}
+      ${xTickLines}
+
+      <!-- Area fills -->
+      <path d="${makeAreaPath('anchored')}" fill="url(#grad-anchored-${containerId})"/>
+      <path d="${makeAreaPath('berthed')}"  fill="url(#grad-berthed-${containerId})"/>
+
+      <!-- Lines -->
+      <path d="${makePath('anchored')}" fill="none" stroke="#ff9800" stroke-width="2" stroke-linejoin="round"/>
+      <path d="${makePath('berthed')}"  fill="none" stroke="#2196f3" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="5 3"/>
+
+      <!-- Legend -->
+      <rect x="${PAD.left}" y="${H - 14}" width="8" height="3" rx="1.5" fill="#ff9800"/>
+      <text x="${PAD.left + 11}" y="${H - 10}" fill="#8b949e" font-size="9">Anchored</text>
+      <rect x="${PAD.left + 62}" y="${H - 14}" width="8" height="3" rx="1.5" fill="#2196f3"/>
+      <text x="${PAD.left + 73}" y="${H - 10}" fill="#8b949e" font-size="9">Berthed</text>
+    </svg>`;
+
+  container.innerHTML = svg;
+}
+
+// ── Live Congestion Mode ─────────────────────────────────────────────────────
+let liveData          = null;
+let livePollingTimer  = null;
+let liveVesselMarkers = L.featureGroup();
+let livePortMarkers   = L.featureGroup();
+
+const LIVE_POLL_INTERVAL = 45000; // 45 seconds
+
+// ── Load live congestion data ────────────────────────────────────────────────
+async function loadLiveData() {
+  try {
+    const res = await fetch('/api/congestion/live');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    liveData = await res.json();
+
+    updateLiveStatus(liveData);
+    renderLivePortList(liveData.ports);
+    renderLiveMapMarkers(liveData.ports);
+  } catch (err) {
+    $('live-port-list').innerHTML = `<div class="cong-error">Failed to load live data: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function updateLiveStatus(data) {
+  const dot  = $('live-status-dot');
+  const text = $('live-status-text');
+  const timeEl = $('live-last-update');
+
+  if (data.stream_status === 'connected') {
+    dot.className = 'live-dot connected';
+    text.textContent = 'Stream connected';
+  } else {
+    dot.className = 'live-dot disconnected';
+    text.textContent = 'Connecting...';
+  }
+
+  if (data.last_message_at) {
+    const ago = Math.round((Date.now() - new Date(data.last_message_at).getTime()) / 1000);
+    timeEl.textContent = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
+  } else {
+    timeEl.textContent = '';
+  }
+}
+
+function renderLivePortList(ports) {
+  const listEl = $('live-port-list');
+  if (!ports || ports.length === 0) {
+    listEl.innerHTML = '<div class="cong-empty">No live data yet. Waiting for AIS stream...</div>';
+    return;
+  }
+
+  const sorted = [...ports].sort((a, b) => b.congestion_score - a.congestion_score);
+
+  listEl.innerHTML = '';
+  sorted.forEach(port => {
+    const score     = Number(port.congestion_score) || 0;
+    const anchored  = Number(port.anchored_count) || 0;
+    const berthed   = Number(port.berthed_count) || 0;
+    const wait      = Number(port.avg_wait_hours) || 0;
+    const level     = port.severity || 'LOW';
+    const color     = levelColor(level);
+    const total     = Number(port.total_vessels) || 0;
+
+    const item = document.createElement('div');
+    item.className = 'port-list-item';
+    item.dataset.locode = port.locode;
+    item.innerHTML = `
+      <div class="pli-stripe ${levelClass(level)}"></div>
+      <div class="pli-body">
+        <div class="pli-top">
+          <div class="pli-name">${escHtml(port.name)}</div>
+          <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${score}</div>
+        </div>
+        <div class="pli-sub">
+          <span class="pli-country">${escHtml(port.country || '')} · ${escHtml(port.locode)}</span>
+          <span class="pli-stats">${total} vessels · ${anchored} anchored</span>
+        </div>
+        <div class="pli-sub">
+          <span class="pli-stats">${berthed} berthed · ${wait > 0 ? wait.toFixed(1) + 'h avg wait' : 'no wait'}</span>
+        </div>
+        <div class="pli-bar-track">
+          <div class="pli-bar-fill" style="width:${score}%;background:${color}"></div>
+        </div>
+      </div>
+    `;
+    item.addEventListener('click', () => openLivePortDetail(port.locode));
+    listEl.appendChild(item);
+  });
+}
+
+function renderLiveMapMarkers(ports) {
+  livePortMarkers.clearLayers();
+  liveVesselMarkers.clearLayers();
+
+  ports.forEach(port => {
+    if (port.lat == null || port.lon == null) return;
+
+    const score  = Number(port.congestion_score) || 0;
+    const color  = levelColor(port.severity || 'LOW');
+    const radius = Math.max(8, Math.min(35, 8 + (port.anchored_count || 0) * 2));
+
+    const circle = L.circleMarker([port.lat, port.lon], {
+      radius,
+      color,
+      weight: 2,
+      opacity: 0.9,
+      fillColor: color,
+      fillOpacity: 0.35,
+    });
+
+    circle.bindTooltip(`
+      <strong>${escHtml(port.name)}</strong><br>
+      ${escHtml(port.locode)} · ${escHtml(port.country || '')}<br>
+      Score: <strong>${score}</strong> · ${escHtml(port.severity || 'LOW')}<br>
+      Vessels: ${port.total_vessels || 0} (${port.anchored_count || 0} anchored)
+    `, { sticky: true, className: 'port-tooltip' });
+
+    circle.on('click', () => openLivePortDetail(port.locode));
+    livePortMarkers.addLayer(circle);
+  });
+}
+
+async function openLivePortDetail(locode) {
+  selectedPortLocode = locode;
+
+  document.querySelectorAll('.port-list-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.locode === locode);
+  });
+
+  const panel = $('port-detail');
+  panel.classList.remove('hidden');
+  panel.classList.add('open');
+
+  $('pd-port-name').textContent = 'Loading…';
+  $('pd-port-meta').textContent = '';
+  $('pd-score-val').textContent = '—';
+  $('pd-level-badge').textContent = '—';
+  $('pd-level-badge').className = 'pd-level-badge';
+  $('pd-peak-anchored').textContent = '—';
+  $('pd-avg-wait').textContent = '—';
+  $('pd-peak-berthed').textContent = '—';
+  $('pd-transitioned').textContent = '—';
+  $('pd-vessel-list').innerHTML = '';
+  $('pd-state-breakdown').innerHTML = '';
+  $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading live data…</div>';
+
+  try {
+    const res = await fetch(`/api/congestion/live/${encodeURIComponent(locode)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const detail = await res.json();
+
+    renderLivePortDetail(detail);
+    renderLiveVesselDots(detail.vessels || []);
+
+    if (detail.lat != null && detail.lon != null) {
+      map.setView([detail.lat, detail.lon], 11, { animate: true });
+    }
+  } catch (err) {
+    $('pd-port-name').textContent = 'Error';
+    $('pd-port-meta').textContent = err.message;
+  }
+}
+
+function renderLivePortDetail(detail) {
+  const m     = detail.metrics;
+  const level = m.severity || 'LOW';
+  const score = Number(m.congestion_score) || 0;
+  const color = levelColor(level);
+
+  $('pd-port-name').textContent = detail.name || detail.locode;
+  $('pd-port-meta').textContent = `${detail.locode} · ${detail.country || ''} · LIVE`;
+
+  const circumference = 2 * Math.PI * 32;
+  const fill = $('pd-ring-fill');
+  fill.style.stroke = color;
+  fill.setAttribute('stroke-dasharray', `${circumference} ${circumference}`);
+  fill.setAttribute('stroke-dashoffset', circumference * (1 - score / 100));
+
+  $('pd-score-val').textContent = score;
+  $('pd-score-val').style.color = color;
+
+  const badge = $('pd-level-badge');
+  badge.textContent = level;
+  badge.className = `pd-level-badge level-${level.toLowerCase()}`;
+
+  $('pd-peak-anchored').textContent = m.anchored_count || 0;
+  $('pd-avg-wait').textContent = m.avg_wait_hours > 0 ? m.avg_wait_hours.toFixed(1) + 'h' : 'N/A';
+  $('pd-peak-berthed').textContent = m.berthed_count || 0;
+  $('pd-transitioned').textContent = m.total_vessels || 0;
+
+  const metricLabels = document.querySelectorAll('.pd-metric-label');
+  if (metricLabels[3]) metricLabels[3].textContent = 'Total Vessels';
+  if (metricLabels[0]) metricLabels[0].textContent = 'Anchored';
+  if (metricLabels[2]) metricLabels[2].textContent = 'Berthed';
+
+  $('pd-timeline-chart').innerHTML = '<div class="timeline-empty">Live mode — no historical timeline</div>';
+
+  const vessels = detail.vessels || [];
+  renderStateBreakdown([], vessels);
+  renderLiveVesselList(vessels);
+}
+
+function renderLiveVesselList(vessels) {
+  const el = $('pd-vessel-list');
+  if (!vessels.length) {
+    el.innerHTML = '<div class="vessel-empty">No vessels in port zone.</div>';
+    return;
+  }
+
+  const stateColors = {
+    ANCHORED:    '#ff9800',
+    BERTHED:     '#2196f3',
+    APPROACHING: '#9c27b0',
+    TRANSITING:  '#4caf50',
+  };
+
+  el.innerHTML = vessels.map(v => {
+    const col     = stateColors[v.state] || '#8b949e';
+    const distStr = v.dist_to_port_nm != null ? `${v.dist_to_port_nm} nm` : '';
+    const waitStr = v.wait_hours > 0 ? `${v.wait_hours}h wait` : '';
+    return `
+      <div class="vessel-row">
+        <div class="vessel-row-top">
+          <span class="vessel-name">${escHtml(v.name || String(v.mmsi))}</span>
+          <span class="state-badge" style="background:${col}20;color:${col};border-color:${col}40">${v.state}</span>
+        </div>
+        <div class="vessel-row-sub">
+          <span class="vessel-type">MMSI: ${v.mmsi}</span>
+          ${distStr ? `<span class="vessel-dist">${escHtml(distStr)}</span>` : ''}
+          ${waitStr ? `<span class="vessel-time">${escHtml(waitStr)}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderLiveVesselDots(vessels) {
+  liveVesselMarkers.clearLayers();
+
+  const stateColors = {
+    ANCHORED:    '#ff9800',
+    BERTHED:     '#2196f3',
+    APPROACHING: '#9c27b0',
+    TRANSITING:  '#4caf50',
+  };
+
+  vessels.forEach(v => {
+    if (v.lat == null || v.lon == null) return;
+
+    const col  = stateColors[v.state] || '#8b949e';
+    const size = v.state === 'ANCHORED' ? 7 : v.state === 'BERTHED' ? 6 : 5;
+
+    const marker = L.circleMarker([v.lat, v.lon], {
+      radius:      size,
+      color:       '#fff',
+      weight:      1.5,
+      fillColor:   col,
+      fillOpacity: 0.85,
+    });
+
+    const waitStr = v.wait_hours > 0 ? `<br>Wait: ${v.wait_hours}h` : '';
+    marker.bindTooltip(`
+      <strong>${escHtml(v.name || String(v.mmsi))}</strong><br>
+      ${v.state} · ${v.speed || 0} kts<br>
+      ${v.dist_to_port_nm || '?'} nm from port${waitStr}
+    `, { sticky: true, className: 'port-tooltip' });
+
+    liveVesselMarkers.addLayer(marker);
+  });
+}
