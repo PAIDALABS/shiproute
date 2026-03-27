@@ -41,6 +41,9 @@ PORTS = [
     {"id": "inccu", "name": "Kolkata", "country": "India", "locode": "INCCU", "lat": 22.57, "lon": 88.37},
     {"id": "inkoc", "name": "Kochi", "country": "India", "locode": "INKOC", "lat": 9.97, "lon": 76.27},
     {"id": "inpav", "name": "Mundra", "country": "India", "locode": "INPAV", "lat": 22.84, "lon": 69.72},
+    {"id": "inkan", "name": "Kandla (Deendayal)", "country": "India", "locode": "INKAN", "lat": 22.98, "lon": 70.22},
+    {"id": "inkak", "name": "Kakinada", "country": "India", "locode": "INKAK", "lat": 16.94, "lon": 82.24},
+    {"id": "invtz", "name": "Vishakhapatnam", "country": "India", "locode": "INVTZ", "lat": 17.69, "lon": 83.30},
     {"id": "lkcmb", "name": "Colombo", "country": "Sri Lanka", "locode": "LKCMB", "lat": 6.95, "lon": 79.85},
     {"id": "bdcgp", "name": "Chittagong", "country": "Bangladesh", "locode": "BDCGP", "lat": 22.33, "lon": 91.83},
     {"id": "pkkar", "name": "Karachi", "country": "Pakistan", "locode": "PKKAR", "lat": 24.85, "lon": 67.01},
@@ -152,6 +155,7 @@ PORTS = [
     {"id": "muplu", "name": "Port Louis", "country": "Mauritius", "locode": "MUPLU", "lat": -20.16, "lon": 57.50},
     {"id": "rereo", "name": "Reunion", "country": "France", "locode": "REREO", "lat": -20.93, "lon": 55.47},
     {"id": "mgtnr", "name": "Toamasina", "country": "Madagascar", "locode": "MGTNR", "lat": -18.15, "lon": 49.40},
+    {"id": "mgtle", "name": "Toliara (Tulear)", "country": "Madagascar", "locode": "MGTLE", "lat": -23.35, "lon": 43.67},
     {"id": "ytmam", "name": "Mayotte", "country": "France", "locode": "YTMAM", "lat": -12.78, "lon": 45.23},
     {"id": "scpov", "name": "Victoria (Seychelles)", "country": "Seychelles", "locode": "SCPOV", "lat": -4.62, "lon": 55.46},
 ]
