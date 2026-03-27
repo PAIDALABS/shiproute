@@ -1120,6 +1120,70 @@ html, body {
   animation: port-pulse 2s ease-in-out infinite;
 }
 
+/* ── Cargo Flow Mode ─────────────────────────────────────────────────────── */
+#flow-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#flow-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#flow-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+}
+
+.flow-port-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+
+.flow-port-card:hover { border-color: var(--accent); }
+
+.flow-port-name {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.flow-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+.flow-stat {
+  text-align: center;
+  padding: 4px;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.flow-stat-val {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.flow-stat-val.warn { color: #ff9800; }
+
+.flow-stat-label {
+  font-size: 8px;
+  color: var(--text2);
+  text-transform: uppercase;
+}
+
 #congestion-legend-live {
   display: flex;
   gap: 10px;

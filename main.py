@@ -15,6 +15,7 @@ import time as _time
 from ports_loader import PortsLoader
 from congestion_engine import CongestionEngine
 from ais_stream import run_ais_stream
+from cargo_flow import compute_cargo_flow, compute_all_ports_flow, save_daily_snapshot
 
 # ── Database connection ───────────────────────────────────────────────────────
 
@@ -142,6 +143,25 @@ def get_all_congestion(min_vessels: int = Query(default=1)):
         return {"ports": [dict(r) for r in rows], "count": len(rows)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Cargo Flow Analysis ───────────────────────────────────────────────────────
+
+@app.get("/api/cargo-flow")
+async def get_all_cargo_flow():
+    """Cargo flow summary for all monitored ports."""
+    from ais_stream import DATALASTIC_API_KEY
+    return await compute_all_ports_flow(engine, DATALASTIC_API_KEY)
+
+
+@app.get("/api/cargo-flow/{locode}")
+async def get_port_cargo_flow(locode: str):
+    """Detailed cargo flow for a single port."""
+    from ais_stream import DATALASTIC_API_KEY
+    flow = await compute_cargo_flow(engine, locode.upper(), DATALASTIC_API_KEY)
+    if not flow:
+        raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
+    return flow
 
 
 # ── Live Port Congestion ──────────────────────────────────────────────────────
@@ -890,6 +910,17 @@ def get_port_timeline(locode: str):
 @app.on_event("startup")
 async def start_ais_stream():
     asyncio.create_task(run_ais_stream(engine))
+    asyncio.create_task(_snapshot_loop())
+
+
+async def _snapshot_loop():
+    """Save daily cargo snapshots for historical analysis."""
+    while True:
+        await asyncio.sleep(3600)  # every hour
+        try:
+            save_daily_snapshot(engine)
+        except Exception:
+            pass
 
 
 # ── Static files ──────────────────────────────────────────────────────────────

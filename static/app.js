@@ -439,11 +439,12 @@ function switchMode(mode) {
   const routeEl   = $('route-mode');
   const congEl    = $('congestion-mode');
   const liveEl    = $('live-mode');
+  const flowEl    = $('flow-mode');
   const btnRoute  = $('btn-route-mode');
   const btnCong   = $('btn-congestion-mode');
   const btnLive   = $('btn-live-mode');
+  const btnFlow   = $('btn-flow-mode');
 
-  // Stop live polling when leaving live mode
   if (livePollingTimer) {
     clearInterval(livePollingTimer);
     livePollingTimer = null;
@@ -453,15 +454,15 @@ function switchMode(mode) {
 
   appMode = mode;
 
-  // Reset all
   routeEl.classList.add('hidden');
   congEl.classList.add('hidden');
   liveEl.classList.add('hidden');
+  flowEl.classList.add('hidden');
   btnRoute.classList.remove('active');
   btnCong.classList.remove('active');
   btnLive.classList.remove('active');
+  btnFlow.classList.remove('active');
 
-  // Remove map layers
   portMarkers.clearLayers();
   closePortDetail();
   if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
@@ -481,6 +482,10 @@ function switchMode(mode) {
     livePortMarkers.addTo(map);
     loadLiveData();
     livePollingTimer = setInterval(loadLiveData, LIVE_POLL_INTERVAL);
+  } else if (mode === 'flow') {
+    flowEl.classList.remove('hidden');
+    btnFlow.classList.add('active');
+    loadCargoFlow();
   }
 }
 
@@ -1389,4 +1394,104 @@ function renderIntelligence(data) {
   }
 
   el.innerHTML = html;
+}
+
+// ── Cargo Flow Mode ──────────────────────────────────────────────────────────
+async function loadCargoFlow() {
+  const loading = $('flow-loading');
+  const content = $('flow-content');
+  loading.classList.remove('hidden');
+  loading.textContent = 'Loading cargo flow for all ports...';
+  content.innerHTML = '';
+
+  try {
+    const res = await fetch('/api/cargo-flow');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    loading.classList.add('hidden');
+    renderCargoFlow(data);
+  } catch (err) {
+    loading.textContent = `Error: ${err.message}`;
+  }
+}
+
+function renderCargoFlow(data) {
+  const content = $('flow-content');
+  const ports = data.ports || [];
+
+  const fmtT = t => {
+    if (!t) return '0';
+    if (t >= 1000000) return (t / 1000000).toFixed(1) + 'M';
+    if (t >= 1000) return Math.round(t / 1000) + 'K';
+    return String(Math.round(t));
+  };
+
+  if (!ports.length) {
+    content.innerHTML = '<div class="vessel-empty">No cargo flow data.</div>';
+    return;
+  }
+
+  const sorted = [...ports].sort((a, b) =>
+    (b.current?.total_at_port_tonnes || 0) - (a.current?.total_at_port_tonnes || 0));
+
+  let html = '';
+
+  let grandBerth = 0, grandAnchor = 0, grandEnroute = 0, grandVessels = 0;
+  sorted.forEach(p => {
+    const c = p.current || {};
+    grandBerth += c.at_berth?.est_cargo_tonnes || 0;
+    grandAnchor += c.at_anchor?.est_cargo_tonnes || 0;
+    grandEnroute += c.approaching?.est_cargo_tonnes || 0;
+    grandVessels += (c.at_berth?.vessels || 0) + (c.at_anchor?.vessels || 0);
+  });
+
+  html += `<div class="flow-port-card" style="border-color:var(--accent)">
+    <div class="flow-port-name" style="color:var(--accent)">All Ports Summary</div>
+    <div class="flow-stats">
+      <div class="flow-stat"><div class="flow-stat-val">${fmtT(grandBerth + grandAnchor)}t</div><div class="flow-stat-label">At Port</div></div>
+      <div class="flow-stat"><div class="flow-stat-val warn">${fmtT(grandEnroute)}t</div><div class="flow-stat-label">En Route</div></div>
+      <div class="flow-stat"><div class="flow-stat-val">${grandVessels}</div><div class="flow-stat-label">Cargo Ships</div></div>
+    </div>
+  </div>`;
+
+  sorted.forEach(p => {
+    const c = p.current || {};
+    const atPort = (c.total_at_port_tonnes || 0);
+    const enroute = (c.total_enroute_tonnes || 0);
+    const berthV = c.at_berth?.vessels || 0;
+    const anchorV = c.at_anchor?.vessels || 0;
+    const approachV = c.approaching?.vessels || 0;
+    const weekly = p.weekly_arrivals_30d || [];
+
+    html += `<div class="flow-port-card">
+      <div class="flow-port-name">${escHtml(p.name)} <span style="color:var(--text2);font-weight:400;font-size:11px">${escHtml(p.locode)}</span></div>
+      <div class="flow-stats">
+        <div class="flow-stat"><div class="flow-stat-val">${fmtT(atPort)}t</div><div class="flow-stat-label">At Port</div></div>
+        <div class="flow-stat"><div class="flow-stat-val warn">${fmtT(enroute)}t</div><div class="flow-stat-label">En Route</div></div>
+        <div class="flow-stat"><div class="flow-stat-val">${berthV + anchorV + approachV}</div><div class="flow-stat-label">Ships</div></div>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:6px;font-size:10px;color:var(--text2)">
+        <span>${berthV} berth</span> · <span>${anchorV} anchor</span> · <span>${approachV} approach</span>
+      </div>`;
+
+    if (weekly.length > 0) {
+      const maxArr = Math.max(...weekly.map(w => w.arrivals), 1);
+      html += `<div style="margin-top:6px">
+        <div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-bottom:3px">Weekly Arrivals (30d)</div>
+        <div style="display:flex;gap:2px;align-items:flex-end;height:30px">`;
+      weekly.forEach(w => {
+        const h = Math.max(3, Math.round((w.arrivals / maxArr) * 28));
+        html += `<div title="${w.week}: ${w.arrivals} arrivals, ${fmtT(w.est_tonnes)}t" style="flex:1;height:${h}px;background:var(--accent);border-radius:2px;min-width:8px"></div>`;
+      });
+      html += `</div></div>`;
+    }
+
+    if (p.snapshot_days_available > 0) {
+      html += `<div style="font-size:10px;color:var(--text2);margin-top:4px">${p.snapshot_days_available} days of historical data</div>`;
+    }
+
+    html += '</div>';
+  });
+
+  content.innerHTML = html;
 }

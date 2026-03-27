@@ -28,6 +28,9 @@
       <button class="mode-btn" id="btn-live-mode" onclick="switchMode('live')">
         Live Congestion
       </button>
+      <button class="mode-btn" id="btn-flow-mode" onclick="switchMode('flow')">
+        Cargo Flow
+      </button>
     </div>
   </nav>
 
@@ -214,6 +217,16 @@
       <!-- Live port list -->
       <div id="live-port-list"></div>
     </div><!-- /#live-mode -->
+
+    <!-- ── Cargo Flow Mode Content ──────────────────────────────────── -->
+    <div id="flow-mode" class="hidden">
+      <div id="flow-header">
+        <div class="brand-title">Cargo Flow</div>
+        <div class="brand-sub">Throughput & seasonal analysis</div>
+      </div>
+      <div id="flow-loading" class="vessel-empty">Loading cargo flow data...</div>
+      <div id="flow-content"></div>
+    </div><!-- /#flow-mode -->
 
   </aside>
 
