@@ -88,6 +88,31 @@ MONITORED_PORTS = {
         "bbox": _make_bbox(-23.35, 43.67, 8),
         "inner_radius_nm": 2.0,
     },
+    # European ports (strong AIS Stream coverage)
+    "NLRTM": {
+        "name": "Rotterdam",
+        "country": "Netherlands",
+        "lat": 51.92,
+        "lon": 4.48,
+        "bbox": _make_bbox(51.92, 4.48, 12),
+        "inner_radius_nm": 2.0,
+    },
+    "BEANR": {
+        "name": "Antwerp",
+        "country": "Belgium",
+        "lat": 51.23,
+        "lon": 4.42,
+        "bbox": _make_bbox(51.23, 4.42, 8),
+        "inner_radius_nm": 1.5,
+    },
+    "DEHAM": {
+        "name": "Hamburg",
+        "country": "Germany",
+        "lat": 53.54,
+        "lon": 9.99,
+        "bbox": _make_bbox(53.54, 9.99, 10),
+        "inner_radius_nm": 2.0,
+    },
 }
 
 

@@ -18,11 +18,14 @@ def test_monitored_ports_have_required_fields():
         assert bbox[0][1] < bbox[1][1]  # west < east
 
 
-def test_five_monitored_ports():
-    assert len(MONITORED_PORTS) == 5
+def test_monitored_ports_count():
+    assert len(MONITORED_PORTS) == 8
     assert "INKAN" in MONITORED_PORTS
     assert "INKAK" in MONITORED_PORTS
     assert "INVTZ" in MONITORED_PORTS
+    assert "NLRTM" in MONITORED_PORTS
+    assert "BEANR" in MONITORED_PORTS
+    assert "DEHAM" in MONITORED_PORTS
     assert "MGTNR" in MONITORED_PORTS
     assert "MGTLE" in MONITORED_PORTS
 
