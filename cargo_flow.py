@@ -170,53 +170,74 @@ async def compute_cargo_flow(
         "total_enroute_tonnes": approaching_tonnes,
     }
 
-    # ── 30-day arrival pattern from vessel history ───────────
-    # For vessels currently at port, trace when they arrived
+    # ── 30-day historical analysis from vessel_history API ──────
+    # For ALL cargo vessels at port, fetch history to reconstruct:
+    # - When each arrived (weekly arrival counts + tonnage)
+    # - Daily port occupancy (how many cargo vessels were present each day)
+    all_cargo = berthed_cargo + anchored_cargo + approaching
     weekly_arrivals = defaultdict(lambda: {"count": 0, "est_tonnes": 0})
+    daily_occupancy = defaultdict(lambda: {"vessels": set(), "est_tonnes": 0})
 
-    cargo_at_port = [v for v in (berthed_cargo + anchored_cargo) if v["mmsi"] in vessel_specs][:12]
-
-    if api_key and cargo_at_port:
+    if api_key and all_cargo:
         async with httpx.AsyncClient() as client:
-            for v in cargo_at_port:
+            for v in all_cargo[:20]:  # up to 20 vessels for history
+                mmsi = v["mmsi"]
+                spec = vessel_specs.get(mmsi, {})
+                est_cargo = spec.get("est_cargo", 0)
                 try:
                     resp = await client.get(
                         "https://api.datalastic.com/api/v0/vessel_history",
-                        params={"api-key": api_key, "mmsi": v["mmsi"], "days": 30},
+                        params={"api-key": api_key, "mmsi": mmsi, "days": 30},
                         timeout=15,
                     )
                     if resp.status_code != 200:
                         continue
                     positions = resp.json().get("data", {}).get("positions", [])
-                    if len(positions) < 5:
+                    if len(positions) < 3:
                         continue
 
-                    # Find arrival: when vessel first entered port bbox
                     bbox = port_def["bbox"]
                     arrival_epoch = None
-                    for p in reversed(positions):  # oldest first
-                        in_bbox = (bbox[0][0] <= p["lat"] <= bbox[1][0]
-                                   and bbox[0][1] <= p["lon"] <= bbox[1][1])
-                        if in_bbox and arrival_epoch is None:
-                            arrival_epoch = p["last_position_epoch"]
-                            break
+                    was_outside = True
+
+                    # Walk oldest→newest to find arrival and daily presence
+                    for p in reversed(positions):
+                        plat, plon = p["lat"], p["lon"]
+                        epoch = p["last_position_epoch"]
+                        in_bbox = (bbox[0][0] <= plat <= bbox[1][0]
+                                   and bbox[0][1] <= plon <= bbox[1][1])
+
+                        if in_bbox:
+                            if was_outside:
+                                arrival_epoch = epoch
+                                was_outside = False
+                            # Mark daily presence
+                            day_key = datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d")
+                            daily_occupancy[day_key]["vessels"].add(mmsi)
+                            daily_occupancy[day_key]["est_tonnes"] += est_cargo
+                        else:
+                            was_outside = True
 
                     if arrival_epoch:
                         dt = datetime.fromtimestamp(arrival_epoch, tz=timezone.utc)
-                        # Week number (ISO)
                         week_key = dt.strftime("%Y-W%W")
-                        spec = vessel_specs.get(v["mmsi"], {})
                         weekly_arrivals[week_key]["count"] += 1
-                        weekly_arrivals[week_key]["est_tonnes"] += spec.get("est_cargo", 0)
+                        weekly_arrivals[week_key]["est_tonnes"] += est_cargo
 
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.15)
                 except Exception:
                     continue
 
-    # Sort weeks chronologically
     weekly_pattern = [
         {"week": k, "arrivals": v["count"], "est_tonnes": v["est_tonnes"]}
         for k, v in sorted(weekly_arrivals.items())
+    ]
+
+    # Convert daily occupancy to list (vessel count per day)
+    daily_pattern = [
+        {"date": k, "vessels": len(v["vessels"]),
+         "est_tonnes_present": min(v["est_tonnes"], 5000000)}  # cap outliers
+        for k, v in sorted(daily_occupancy.items())
     ]
 
     # ── Historical snapshots ─────────────────────────────────
@@ -232,11 +253,19 @@ async def compute_cargo_flow(
                 "congestion_score": port_snap.get("congestion_score", 0),
             })
 
+    # Compute monthly summary from weekly data
+    monthly = defaultdict(lambda: {"arrivals": 0, "est_tonnes": 0})
+    for w in weekly_pattern:
+        month_key = w["week"][:7]  # YYYY-W -> YYYY-M approx
+        monthly[month_key]["arrivals"] += w["arrivals"]
+        monthly[month_key]["est_tonnes"] += w["est_tonnes"]
+
     return {
         "locode": locode,
         "name": port_def["name"],
         "current": current,
         "weekly_arrivals_30d": weekly_pattern,
+        "daily_occupancy_30d": daily_pattern,
         "historical_daily": historical,
         "snapshot_days_available": len(historical),
     }

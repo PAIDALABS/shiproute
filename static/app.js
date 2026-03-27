@@ -1474,6 +1474,7 @@ function renderCargoFlow(data) {
         <span>${berthV} berth</span> · <span>${anchorV} anchor</span> · <span>${approachV} approach</span>
       </div>`;
 
+    // Weekly arrivals bar chart
     if (weekly.length > 0) {
       const maxArr = Math.max(...weekly.map(w => w.arrivals), 1);
       html += `<div style="margin-top:6px">
@@ -1484,10 +1485,33 @@ function renderCargoFlow(data) {
         html += `<div title="${w.week}: ${w.arrivals} arrivals, ${fmtT(w.est_tonnes)}t" style="flex:1;height:${h}px;background:var(--accent);border-radius:2px;min-width:8px"></div>`;
       });
       html += `</div></div>`;
+
+      // Weekly tonnage summary
+      const totalWeeklyT = weekly.reduce((s, w) => s + (w.est_tonnes || 0), 0);
+      const totalArrivals = weekly.reduce((s, w) => s + w.arrivals, 0);
+      html += `<div style="font-size:10px;color:var(--text2);margin-top:3px">
+        30d total: ${totalArrivals} arrivals · ${fmtT(totalWeeklyT)}t throughput
+      </div>`;
     }
 
-    if (p.snapshot_days_available > 0) {
-      html += `<div style="font-size:10px;color:var(--text2);margin-top:4px">${p.snapshot_days_available} days of historical data</div>`;
+    // Daily occupancy chart (vessels at port each day)
+    const daily = p.daily_occupancy_30d || [];
+    if (daily.length > 0) {
+      const maxV = Math.max(...daily.map(d => d.vessels), 1);
+      html += `<div style="margin-top:6px">
+        <div style="font-size:9px;color:var(--text2);text-transform:uppercase;margin-bottom:3px">Daily Cargo Vessels at Port (30d)</div>
+        <div style="display:flex;gap:1px;align-items:flex-end;height:30px">`;
+      daily.forEach(d => {
+        const h = Math.max(2, Math.round((d.vessels / maxV) * 28));
+        const dateStr = d.date.substring(5); // MM-DD
+        html += `<div title="${d.date}: ${d.vessels} vessels" style="flex:1;height:${h}px;background:#ff9800;border-radius:1px;min-width:3px"></div>`;
+      });
+      html += `</div>
+        <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--text2);margin-top:2px">
+          <span>${daily[0]?.date?.substring(5) || ''}</span>
+          <span>${daily[daily.length-1]?.date?.substring(5) || ''}</span>
+        </div>
+      </div>`;
     }
 
     html += '</div>';
