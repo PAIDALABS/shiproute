@@ -1055,9 +1055,9 @@ async function openLivePortDetail(locode) {
 }
 
 function renderLivePortDetail(detail) {
-  const m     = detail.metrics;
-  const level = m.severity || 'LOW';
-  const score = Number(m.congestion_score) || 0;
+  // Metrics are at top level, not nested under detail.metrics
+  const level = detail.severity || 'LOW';
+  const score = Number(detail.congestion_score) || 0;
   const color = levelColor(level);
 
   $('pd-port-name').textContent = detail.name || detail.locode;
@@ -1076,10 +1076,10 @@ function renderLivePortDetail(detail) {
   badge.textContent = level;
   badge.className = `pd-level-badge level-${level.toLowerCase()}`;
 
-  $('pd-peak-anchored').textContent = m.anchored_count || 0;
-  $('pd-avg-wait').textContent = m.avg_wait_hours > 0 ? m.avg_wait_hours.toFixed(1) + 'h' : 'N/A';
-  $('pd-peak-berthed').textContent = m.berthed_count || 0;
-  $('pd-transitioned').textContent = m.total_vessels || 0;
+  $('pd-peak-anchored').textContent = detail.anchored_count || 0;
+  $('pd-avg-wait').textContent = detail.avg_wait_hours > 0 ? detail.avg_wait_hours.toFixed(1) + 'h' : 'N/A';
+  $('pd-peak-berthed').textContent = detail.berthed_count || 0;
+  $('pd-transitioned').textContent = detail.total_vessels || 0;
 
   const metricLabels = document.querySelectorAll('.pd-metric-label');
   if (metricLabels[3]) metricLabels[3].textContent = 'Total Vessels';
