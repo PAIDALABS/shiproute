@@ -175,12 +175,160 @@ def get_live_port_detail(locode: str):
 
 
 @app.get("/api/congestion/live/{locode}/turnaround")
-def get_live_turnaround(locode: str):
-    """Return turnaround time stats by vessel type for a port."""
-    stats = engine.get_turnaround_stats(locode.upper())
-    if not stats:
+async def get_live_turnaround(locode: str):
+    """Return turnaround time stats by vessel type using Datalastic history."""
+    from ais_stream import DATALASTIC_API_KEY
+    import httpx
+
+    locode_upper = locode.upper()
+    port_detail = engine.get_port_detail(locode_upper)
+    if not port_detail:
         raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
-    return stats
+
+    port_def = None
+    from congestion_engine import MONITORED_PORTS
+    port_def = MONITORED_PORTS.get(locode_upper)
+
+    vessels = port_detail.get("vessels", [])
+    if not vessels or not DATALASTIC_API_KEY:
+        # Fall back to in-memory data
+        stats = engine.get_turnaround_stats(locode_upper)
+        if stats:
+            stats["source"] = "live"
+        return stats
+
+    # Fetch history for up to 20 vessels (to stay within API limits)
+    # Prioritize anchored/berthed vessels (most interesting for turnaround)
+    priority_vessels = sorted(
+        [v for v in vessels if v.get("state") in ("ANCHORED", "BERTHED")],
+        key=lambda v: v.get("dist_to_port_nm", 999),
+    )[:20]
+
+    visit_data = []
+
+    async with httpx.AsyncClient() as client:
+        for v in priority_vessels:
+            mmsi = v.get("mmsi")
+            if not mmsi:
+                continue
+            try:
+                resp = await client.get(
+                    "https://api.datalastic.com/api/v0/vessel_history",
+                    params={"api-key": DATALASTIC_API_KEY, "mmsi": mmsi, "days": 30},
+                    timeout=15,
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json().get("data", {})
+                positions = data.get("positions", [])
+                if len(positions) < 2:
+                    continue
+
+                vtype = data.get("type_specific") or data.get("type") or v.get("ship_type") or "Unknown"
+                name = data.get("name") or v.get("name") or str(mmsi)
+
+                # Analyze positions (newest first) — find when vessel arrived in port area
+                port_lat = port_def["lat"]
+                port_lon = port_def["lon"]
+                from congestion_engine import _haversine_nm
+                inner_r = port_def["inner_radius_nm"]
+                bbox = port_def["bbox"]
+
+                anchor_seconds = 0
+                berth_seconds = 0
+                arrival_epoch = None
+                prev_epoch = None
+
+                # Process oldest-first
+                for p in reversed(positions):
+                    plat, plon = p["lat"], p["lon"]
+                    epoch = p["last_position_epoch"]
+
+                    # Check if in port bbox
+                    if not (bbox[0][0] <= plat <= bbox[1][0] and bbox[0][1] <= plon <= bbox[1][1]):
+                        # Outside port — reset if we haven't started counting
+                        if arrival_epoch is not None and prev_epoch is not None:
+                            break  # Left port, visit over
+                        continue
+
+                    if arrival_epoch is None:
+                        arrival_epoch = epoch
+
+                    speed = p.get("speed", 0) or 0
+                    dist_nm = _haversine_nm(plat, plon, port_lat, port_lon)
+
+                    if prev_epoch is not None:
+                        dt = epoch - prev_epoch
+                        if dt > 0 and dt < 86400:  # skip gaps > 24h
+                            if speed < 0.3 and dist_nm <= inner_r:
+                                berth_seconds += dt
+                            elif speed < 0.5:
+                                anchor_seconds += dt
+
+                    prev_epoch = epoch
+
+                if arrival_epoch is None:
+                    continue
+
+                last_epoch = positions[0]["last_position_epoch"]
+                total_hours = (last_epoch - arrival_epoch) / 3600.0
+
+                if total_hours < 0.5:
+                    continue
+
+                visit_data.append({
+                    "mmsi": mmsi,
+                    "name": name,
+                    "vessel_type": vtype,
+                    "total_hours": round(total_hours, 1),
+                    "anchor_hours": round(anchor_seconds / 3600, 1),
+                    "berth_hours": round(berth_seconds / 3600, 1),
+                })
+
+            except Exception:
+                continue
+
+    if not visit_data:
+        stats = engine.get_turnaround_stats(locode_upper)
+        if stats:
+            stats["source"] = "live"
+        return stats
+
+    # Aggregate by vessel type
+    type_groups: dict[str, list] = {}
+    for vd in visit_data:
+        type_groups.setdefault(vd["vessel_type"], []).append(vd)
+
+    type_stats = []
+    for vtype, visits in sorted(type_groups.items(), key=lambda x: -len(x[1])):
+        n = len(visits)
+        type_stats.append({
+            "vessel_type": vtype,
+            "count": n,
+            "avg_total_hours": round(sum(v["total_hours"] for v in visits) / n, 1),
+            "avg_anchor_hours": round(sum(v["anchor_hours"] for v in visits) / n, 1),
+            "avg_berth_hours": round(sum(v["berth_hours"] for v in visits) / n, 1),
+            "max_total_hours": round(max(v["total_hours"] for v in visits), 1),
+            "max_anchor_hours": round(max(v["anchor_hours"] for v in visits), 1),
+            "min_total_hours": round(min(v["total_hours"] for v in visits), 1),
+        })
+
+    all_total = [v["total_hours"] for v in visit_data]
+    all_anchor = [v["anchor_hours"] for v in visit_data]
+    all_berth = [v["berth_hours"] for v in visit_data]
+
+    return {
+        "locode": locode_upper,
+        "name": port_def["name"],
+        "source": "datalastic_history",
+        "overall": {
+            "total_visits": len(visit_data),
+            "avg_turnaround_hours": round(sum(all_total) / len(all_total), 1),
+            "avg_wait_hours": round(sum(all_anchor) / len(all_anchor), 1),
+            "avg_berth_hours": round(sum(all_berth) / len(all_berth), 1),
+        },
+        "by_vessel_type": type_stats,
+    }
 
 
 # ── Port Congestion v2 ────────────────────────────────────────────────────────
