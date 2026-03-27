@@ -51,10 +51,16 @@ def _parse_vessel(vessel: dict) -> dict | None:
             "speed": float(vessel.get("speed", 0) or 0),
             "course": float(vessel.get("course", 0) or 0),
             "heading": int(vessel.get("heading", 0) or 0),
-            "nav_status": None,  # Datalastic doesn't provide nav_status directly
+            "nav_status": None,
             "ship_type": vessel.get("type"),
             "name": (vessel.get("name") or "").strip() or None,
             "timestamp": time.time(),
+            # Extra fields for intelligence
+            "country_iso": vessel.get("country_iso"),
+            "type_specific": vessel.get("type_specific"),
+            "destination": vessel.get("destination"),
+            "eta_epoch": vessel.get("eta_epoch"),
+            "imo": vessel.get("imo"),
         }
     except (TypeError, ValueError) as exc:
         logger.debug("Failed to parse vessel: %s", exc)

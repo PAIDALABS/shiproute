@@ -1050,21 +1050,13 @@ async function openLivePortDetail(locode) {
       map.setView([detail.lat, detail.lon], 11, { animate: true });
     }
 
-    // Load cargo and turnaround in background (slow — fetches vessel specs/history)
-    $('pd-cargo').innerHTML = '<div class="vessel-empty">Loading cargo data...</div>';
-    fetch(`/api/congestion/live/${encodeURIComponent(locode)}/cargo`)
+    // Load intelligence in background (fetches vessel specs + history)
+    $('pd-intelligence').innerHTML = '<div class="vessel-empty">Loading port intelligence...</div>';
+    fetch(`/api/congestion/live/${encodeURIComponent(locode)}/intelligence`)
       .then(r => r.ok ? r.json() : null)
-      .then(cargo => renderCargoStats(cargo))
+      .then(intel => renderIntelligence(intel))
       .catch(() => {
-        $('pd-cargo').innerHTML = '<div class="vessel-empty">Could not load cargo data.</div>';
-      });
-
-    $('pd-turnaround').innerHTML = '<div class="vessel-empty">Loading turnaround data...</div>';
-    fetch(`/api/congestion/live/${encodeURIComponent(locode)}/turnaround`)
-      .then(r => r.ok ? r.json() : null)
-      .then(turnaround => renderTurnaroundStats(turnaround))
-      .catch(() => {
-        $('pd-turnaround').innerHTML = '<div class="vessel-empty">Could not load turnaround data.</div>';
+        $('pd-intelligence').innerHTML = '<div class="vessel-empty">Could not load intelligence.</div>';
       });
   } catch (err) {
     $('pd-port-name').textContent = 'Error';
@@ -1232,72 +1224,168 @@ function renderTurnaroundStats(data) {
   el.innerHTML = html;
 }
 
-// ── Cargo estimation ─────────────────────────────────────────────────────────
-function renderCargoStats(data) {
-  const el = $('pd-cargo');
-  if (!data || !data.vessels || data.vessels.length === 0) {
-    el.innerHTML = '<div class="vessel-empty">No cargo data available.</div>';
+// ── Port Intelligence ─────────────────────────────────────────────────────────
+function renderIntelligence(data) {
+  const el = $('pd-intelligence');
+  if (!data) {
+    el.innerHTML = '<div class="vessel-empty">No intelligence data.</div>';
     return;
   }
 
-  const s = data.summary;
   const fmtT = t => {
+    if (!t) return '0';
     if (t >= 1000000) return (t / 1000000).toFixed(1) + 'M';
     if (t >= 1000) return Math.round(t / 1000) + 'K';
-    return String(t);
+    return String(Math.round(t));
   };
+  const fmtH = h => h < 1 ? `${Math.round(h * 60)}m` : h < 24 ? `${h.toFixed(1)}h` : `${(h / 24).toFixed(1)}d`;
 
-  let html = `
-    <div class="cargo-summary">
-      <div class="cargo-stat">
-        <div class="cargo-stat-val">${fmtT(s.total_est_cargo_tonnes)} t</div>
-        <div class="cargo-stat-label">Est. Cargo</div>
-      </div>
-      <div class="cargo-stat">
-        <div class="cargo-stat-val">${fmtT(s.total_dwt)} DWT</div>
-        <div class="cargo-stat-label">Total Capacity</div>
-      </div>
-      <div class="cargo-stat">
-        <div class="cargo-stat-val">${s.avg_load_pct != null ? s.avg_load_pct + '%' : 'N/A'}</div>
-        <div class="cargo-stat-label">Avg Load</div>
-      </div>
-      <div class="cargo-stat">
-        <div class="cargo-stat-val">${data.vessels_analyzed}</div>
-        <div class="cargo-stat-label">Vessels</div>
+  let html = '';
+
+  // ── Africa Bagged Cargo Leads (TOP PRIORITY) ──────────
+  const leads = data.africa_bagged_cargo_leads || [];
+  if (leads.length > 0) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title" style="color:#ff9800">Africa Cargo Leads (${leads.length})</div>`;
+    leads.forEach(l => {
+      html += `<div class="intel-lead">
+        <div class="intel-lead-name">${escHtml(l.name || String(l.mmsi))}</div>
+        <div class="intel-lead-detail">${escHtml(l.type || '')} · ${escHtml(l.flag || '')} · ${escHtml(l.reason)}</div>
+        ${l.destination ? `<div class="intel-lead-detail">Dest: ${escHtml(l.destination)}</div>` : ''}
       </div>`;
-
-  if (s.total_teu_capacity > 0) {
-    html += `
-      <div class="cargo-stat wide">
-        <div class="cargo-stat-val">${fmtT(s.total_teu_capacity)} TEU</div>
-        <div class="cargo-stat-label">Container Capacity</div>
-      </div>`;
-  }
-
-  html += '</div>';
-
-  // Cargo breakdown by type with bars
-  if (data.by_type && data.by_type.length > 0) {
-    const maxCargo = Math.max(...data.by_type.map(t => t.total_est_cargo || 0), 1);
-    html += '<div class="cargo-bar">';
-    data.by_type.forEach(t => {
-      const pct = Math.round((t.total_est_cargo / maxCargo) * 100);
-      const colors = {
-        'Bulk Carrier': '#ff9800', 'General Cargo': '#2196f3',
-        'Tanker': '#f44336', 'Oil/Chemical Tanker': '#e91e63',
-        'Container Ship': '#4caf50', 'Cargo': '#ff9800',
-      };
-      const col = colors[t.vessel_type] || '#9c27b0';
-      html += `
-        <div class="cargo-bar-row">
-          <span class="cargo-bar-label" title="${escHtml(t.vessel_type)}">${escHtml(t.vessel_type)}</span>
-          <div class="cargo-bar-track">
-            <div class="cargo-bar-fill" style="width:${pct}%;background:${col}"></div>
-          </div>
-          <span class="cargo-bar-val">${fmtT(t.total_est_cargo)} t (${t.count})</span>
-        </div>`;
     });
     html += '</div>';
+  }
+
+  // ── Cargo Estimation ──────────────────────────────────
+  const cargo = data.specs?.cargo_estimate;
+  if (cargo && cargo.vessels_analyzed > 0) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Cargo Estimation</div>
+      <div class="intel-grid">
+        <div class="intel-card"><div class="intel-val warn">${fmtT(cargo.total_est_cargo_tonnes)}t</div><div class="intel-label">Est. Cargo</div></div>
+        <div class="intel-card"><div class="intel-val">${fmtT(cargo.total_dwt)} DWT</div><div class="intel-label">Capacity</div></div>
+        <div class="intel-card"><div class="intel-val ${cargo.avg_load_pct > 80 ? 'hot' : 'good'}">${cargo.avg_load_pct != null ? cargo.avg_load_pct + '%' : 'N/A'}</div><div class="intel-label">Avg Load</div></div>
+      </div>`;
+    if (cargo.by_type?.length) {
+      const maxC = Math.max(...cargo.by_type.map(t => t.est_cargo || 0), 1);
+      cargo.by_type.forEach(t => {
+        const pct = Math.round((t.est_cargo / maxC) * 100);
+        html += `<div class="intel-bar-row">
+          <span class="intel-bar-label" title="${escHtml(t.type)}">${escHtml(t.type)}</span>
+          <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${pct}%;background:#ff9800"></div></div>
+          <span class="intel-bar-val">${fmtT(t.est_cargo)}t</span>
+        </div>`;
+      });
+    }
+    html += '</div>';
+  }
+
+  // ── Trade Route Origins ───────────────────────────────
+  const origins = data.origins || [];
+  if (origins.length > 0) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Trade Origins (30d history)</div>`;
+    origins.forEach(o => {
+      html += `<div class="intel-origin-line">
+        <span class="intel-origin-dot"></span>
+        <span style="font-weight:500;flex:1">${escHtml(o.name || '?')}</span>
+        <span style="color:var(--text2);font-size:10px">${escHtml(o.type || '')}</span>
+      </div>
+      <div style="font-size:10px;color:var(--text2);padding-left:14px;margin-bottom:4px">
+        From (${o.origin_lat}, ${o.origin_lon}) ${o.origin_date ? o.origin_date.split('T')[0] : ''}
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // ── Flag Distribution ─────────────────────────────────
+  const flags = data.flag_distribution || [];
+  if (flags.length > 0) {
+    const maxF = flags[0]?.count || 1;
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Flag States</div>`;
+    flags.slice(0, 8).forEach(f => {
+      const pct = Math.round((f.count / maxF) * 100);
+      html += `<div class="intel-bar-row">
+        <span class="intel-bar-label">${escHtml(f.flag)}</span>
+        <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${pct}%;background:#2196f3"></div></div>
+        <span class="intel-bar-val">${f.count} (${f.pct}%)</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // ── Fleet Profile ─────────────────────────────────────
+  const age = data.specs?.fleet_age;
+  const sizes = data.specs?.size_classes;
+  if (age && age.vessels_with_data) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Fleet Profile</div>
+      <div class="intel-grid">
+        <div class="intel-card"><div class="intel-val">${age.avg_age}y</div><div class="intel-label">Avg Age</div></div>
+        <div class="intel-card"><div class="intel-val good">${age.newest}y</div><div class="intel-label">Newest</div></div>
+        <div class="intel-card"><div class="intel-val ${age.oldest > 25 ? 'hot' : 'warn'}">${age.oldest}y</div><div class="intel-label">Oldest</div></div>
+      </div>`;
+    if (sizes?.length) {
+      const maxS = Math.max(...sizes.map(s => s.count), 1);
+      sizes.forEach(s => {
+        const pct = Math.round((s.count / maxS) * 100);
+        html += `<div class="intel-bar-row">
+          <span class="intel-bar-label">${escHtml(s.class)}</span>
+          <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${pct}%;background:#9c27b0"></div></div>
+          <span class="intel-bar-val">${s.count}</span>
+        </div>`;
+      });
+    }
+    html += '</div>';
+  }
+
+  // ── Port Specialization ───────────────────────────────
+  const spec = data.port_specialization || [];
+  if (spec.length > 0) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Port Specialization</div>`;
+    spec.forEach(s => {
+      html += `<div class="intel-bar-row">
+        <span class="intel-bar-label">${escHtml(s.type)}</span>
+        <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${s.pct}%;background:#4caf50"></div></div>
+        <span class="intel-bar-val">${s.pct}%</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // ── ETA Analysis ──────────────────────────────────────
+  const eta = data.eta_analysis;
+  if (eta && eta.vessels_with_eta > 0) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title">ETA Accuracy</div>
+      <div class="intel-grid">
+        <div class="intel-card"><div class="intel-val">${eta.vessels_with_eta}</div><div class="intel-label">With ETA</div></div>
+        <div class="intel-card"><div class="intel-val good">${eta.already_arrived}</div><div class="intel-label">Arrived</div></div>
+        <div class="intel-card"><div class="intel-val">${eta.still_expected}</div><div class="intel-label">Expected</div></div>
+      </div>
+      ${eta.avg_overdue_hours > 0 ? `<div style="font-size:11px;color:var(--text2);text-align:center">Avg ${fmtH(eta.avg_overdue_hours)} past ETA · Max ${fmtH(eta.max_overdue_hours)}</div>` : ''}
+    </div>`;
+  }
+
+  // ── Speed Profile ─────────────────────────────────────
+  const sp = data.speed_profile;
+  if (sp) {
+    const total = sp.stationary + sp.slow + sp.moderate + sp.fast || 1;
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Speed Profile</div>
+      <div class="intel-grid">
+        <div class="intel-card"><div class="intel-val">${sp.stationary}</div><div class="intel-label">Stationary</div></div>
+        <div class="intel-card"><div class="intel-val">${sp.slow}</div><div class="intel-label">Slow</div></div>
+        <div class="intel-card"><div class="intel-val">${sp.fast + sp.moderate}</div><div class="intel-label">Moving</div></div>
+      </div>
+    </div>`;
+  }
+
+  if (!html) {
+    html = '<div class="vessel-empty">No intelligence data available.</div>';
   }
 
   el.innerHTML = html;

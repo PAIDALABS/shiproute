@@ -1126,6 +1126,136 @@ html, body {
   flex-wrap: wrap;
 }
 
+/* ── Port Intelligence ──────────────────────────────────────────────────── */
+.pd-intelligence {
+  padding: 0 16px 12px;
+}
+
+.intel-section {
+  margin-bottom: 14px;
+}
+
+.intel-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--accent);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.intel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.intel-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  text-align: center;
+}
+
+.intel-card.wide { grid-column: span 2; }
+.intel-card.full { grid-column: span 3; }
+
+.intel-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.intel-val.warn { color: #ff9800; }
+.intel-val.good { color: var(--success); }
+.intel-val.hot { color: var(--danger); }
+
+.intel-label {
+  font-size: 8px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  margin-top: 1px;
+}
+
+.intel-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+.intel-bar-label {
+  min-width: 55px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 10px;
+}
+
+.intel-bar-track {
+  flex: 1;
+  height: 10px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.intel-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .3s;
+}
+
+.intel-bar-val {
+  font-size: 10px;
+  color: var(--text2);
+  min-width: 30px;
+  text-align: right;
+}
+
+.intel-lead {
+  background: var(--bg3);
+  border: 1px solid rgba(255,152,0,.3);
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-bottom: 4px;
+}
+
+.intel-lead-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: #ff9800;
+}
+
+.intel-lead-detail {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 2px;
+}
+
+.intel-origin-line {
+  font-size: 11px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(48,54,61,.4);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.intel-origin-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
 /* ── Cargo estimation ───────────────────────────────────────────────────── */
 .pd-cargo {
   padding: 0 16px 12px;

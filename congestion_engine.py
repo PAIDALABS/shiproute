@@ -198,6 +198,12 @@ class CongestionEngine:
         ship_type: Optional[int],
         name: Optional[str],
         timestamp: float,
+        # Extra fields for intelligence (optional)
+        country_iso: Optional[str] = None,
+        type_specific: Optional[str] = None,
+        destination: Optional[str] = None,
+        eta_epoch: Optional[float] = None,
+        imo: Optional[str] = None,
     ) -> None:
         """Ingest a vessel position update.
 
@@ -276,6 +282,12 @@ class CongestionEngine:
             "last_seen": now,
             "anchor_hours": anchor_hours,
             "berth_hours": berth_hours,
+            # Intelligence fields
+            "country_iso": country_iso or (existing["country_iso"] if existing else None),
+            "type_specific": type_specific or (existing["type_specific"] if existing else None),
+            "destination": destination or (existing["destination"] if existing else None),
+            "eta_epoch": eta_epoch or (existing["eta_epoch"] if existing else None),
+            "imo": imo or (existing["imo"] if existing else None),
         }
 
         self._port_vessels[target_locode][mmsi] = vessel_dict

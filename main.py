@@ -165,6 +165,102 @@ def get_live_status():
     return engine.get_status()
 
 
+@app.get("/api/congestion/live/{locode}/intelligence")
+async def get_port_intelligence(locode: str):
+    """Comprehensive port intelligence — flag, type, size, cargo, origins, Africa bagged cargo leads."""
+    from ais_stream import DATALASTIC_API_KEY
+    from port_intelligence import compute_instant_intelligence, enrich_with_specs, trace_origins
+    from congestion_engine import MONITORED_PORTS
+
+    locode_upper = locode.upper()
+    port_detail = engine.get_port_detail(locode_upper)
+    if not port_detail:
+        raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
+
+    port_def = MONITORED_PORTS.get(locode_upper, {})
+    vessels = port_detail.get("vessels", [])
+
+    # Instant metrics (no API calls)
+    instant = compute_instant_intelligence(vessels, port_def)
+
+    result = {
+        "locode": locode_upper,
+        "name": port_def.get("name", locode_upper),
+        "total_vessels": len(vessels),
+        **instant,
+    }
+
+    if not DATALASTIC_API_KEY or not vessels:
+        result["specs"] = {}
+        result["origins"] = []
+        result["africa_bagged_cargo_leads"] = []
+        return result
+
+    # Enriched metrics (vessel_info + vessel_history API calls)
+    specs, origins = await asyncio.gather(
+        enrich_with_specs(vessels, DATALASTIC_API_KEY, max_vessels=25),
+        trace_origins(vessels, DATALASTIC_API_KEY, port_def, max_vessels=8),
+    )
+
+    result["specs"] = specs
+    result["origins"] = origins
+
+    # ── Africa bagged cargo leads ────────────────────────────
+    # Identify General Cargo / Multi Purpose vessels with African port destinations
+    # These are the most likely bagged cargo carriers
+    africa_keywords = [
+        "AFRICA", "MOMBASA", "DAR", "MAPUTO", "DJIBOUTI", "MOGADISHU",
+        "LAGOS", "APAPA", "TEMA", "ABIDJAN", "DAKAR", "LUANDA", "DOUALA",
+        "DURBAN", "CAPE TOWN", "PORT ELIZABETH", "BEIRA", "NACALA",
+        "TOAMASINA", "TAMATAVE", "ZANZIBAR", "LAMU", "BERBERA",
+        "MADAGASCAR", "KENYA", "TANZANIA", "MOZAMBIQUE", "NIGERIA",
+        "GHANA", "SENEGAL", "ANGOLA", "CAMEROON", "SOMALIA", "SUDAN",
+        "MZ", "KE", "TZ", "NG", "GH", "SN", "AO", "CM", "DJ", "SO",
+        "MG", "MU", "SC", "ZA",
+    ]
+    bagged_cargo_types = ["General Cargo", "Multi Purpose", "Cargo", "Bulk Carrier"]
+
+    leads = []
+    for v in vessels:
+        vtype = v.get("type_specific") or v.get("type") or ""
+        dest = (v.get("destination") or "").strip().upper()
+        flag = (v.get("country_iso") or "").upper()
+
+        is_cargo_type = any(bt.lower() in vtype.lower() for bt in bagged_cargo_types)
+        is_africa_dest = any(kw in dest for kw in africa_keywords)
+        is_africa_flag = flag in ("MZ", "KE", "TZ", "NG", "GH", "SN", "AO", "CM", "DJ", "SO", "MG", "ZA")
+
+        if is_cargo_type and (is_africa_dest or is_africa_flag):
+            leads.append({
+                "mmsi": v.get("mmsi"),
+                "name": v.get("name"),
+                "type": vtype,
+                "flag": flag,
+                "destination": dest,
+                "state": v.get("state"),
+                "reason": "Africa destination" if is_africa_dest else "Africa flag",
+            })
+
+    # Also check origins for Africa-origin vessels
+    for o in origins:
+        if o.get("origin_lat") and -35 < o["origin_lat"] < 15 and 10 < o["origin_lon"] < 55:
+            # Rough Africa bounding box
+            already = any(l["mmsi"] == o["mmsi"] for l in leads)
+            if not already:
+                leads.append({
+                    "mmsi": o["mmsi"],
+                    "name": o["name"],
+                    "type": o.get("type"),
+                    "flag": "",
+                    "destination": "",
+                    "state": "",
+                    "reason": f"Origin near Africa ({o['origin_lat']:.1f}, {o['origin_lon']:.1f})",
+                })
+
+    result["africa_bagged_cargo_leads"] = leads
+    return result
+
+
 @app.get("/api/congestion/live/{locode}")
 def get_live_port_detail(locode: str):
     """Return live congestion detail for a specific port with vessel list."""
