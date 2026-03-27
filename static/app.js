@@ -1038,22 +1038,26 @@ async function openLivePortDetail(locode) {
   $('pd-timeline-chart').innerHTML = '<div class="timeline-loading">Loading live data…</div>';
 
   try {
-    const [detailRes, turnaroundRes] = await Promise.all([
-      fetch(`/api/congestion/live/${encodeURIComponent(locode)}`),
-      fetch(`/api/congestion/live/${encodeURIComponent(locode)}/turnaround`),
-    ]);
-
+    // Load detail immediately (fast)
+    const detailRes = await fetch(`/api/congestion/live/${encodeURIComponent(locode)}`);
     if (!detailRes.ok) throw new Error(`HTTP ${detailRes.status}`);
     const detail = await detailRes.json();
-    const turnaround = turnaroundRes.ok ? await turnaroundRes.json() : null;
 
     renderLivePortDetail(detail);
     renderLiveVesselDots(detail.vessels || []);
-    renderTurnaroundStats(turnaround);
 
     if (detail.lat != null && detail.lon != null) {
       map.setView([detail.lat, detail.lon], 11, { animate: true });
     }
+
+    // Load turnaround in background (slow — fetches vessel history)
+    $('pd-turnaround').innerHTML = '<div class="vessel-empty">Loading turnaround data...</div>';
+    fetch(`/api/congestion/live/${encodeURIComponent(locode)}/turnaround`)
+      .then(r => r.ok ? r.json() : null)
+      .then(turnaround => renderTurnaroundStats(turnaround))
+      .catch(() => {
+        $('pd-turnaround').innerHTML = '<div class="vessel-empty">Could not load turnaround data.</div>';
+      });
   } catch (err) {
     $('pd-port-name').textContent = 'Error';
     $('pd-port-meta').textContent = err.message;
