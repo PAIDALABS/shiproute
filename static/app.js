@@ -60,75 +60,68 @@ if (fuelPreset) {
   });
 }
 
-// ── Waypoint Autocomplete (Voyage Mode) ───────────────────────────────────
-function setupWaypointAutocomplete(input, dropdown, wpIndex) {
+// ── Port Autocomplete Factory ─────────────────────────────────────────────
+function createPortAutocomplete(input, dropdown, onSelect, opts = {}) {
   let debounceTimer = null;
-  let focusedIdx    = -1;
-  let items         = [];
-
-  function openDropdown(results) {
-    items = results;
-    focusedIdx = -1;
-    dropdown.innerHTML = '';
-    if (!results.length) { dropdown.classList.remove('open'); return; }
-
-    results.forEach((port, i) => {
-      const div = document.createElement('div');
-      div.className = 'dropdown-item';
-      div.innerHTML = `
-        <span class="di-locode">${escHtml(port.locode)}</span>
-        <div class="di-info">
-          <div class="di-name">${escHtml(port.name)}</div>
-          <div class="di-country">${escHtml(port.country)}</div>
-        </div>`;
-      div.addEventListener('mousedown', e => { e.preventDefault(); selectPort(port); });
-      dropdown.appendChild(div);
-    });
-    dropdown.classList.add('open');
-  }
-
-  function closeDropdown() { dropdown.classList.remove('open'); focusedIdx = -1; }
-
-  function setFocus(idx) {
-    const divs = dropdown.querySelectorAll('.dropdown-item');
-    divs.forEach(d => d.classList.remove('focused'));
-    if (idx >= 0 && idx < divs.length) {
-      divs[idx].classList.add('focused');
-      divs[idx].scrollIntoView({ block: 'nearest' });
-    }
-    focusedIdx = idx;
-  }
-
-  function selectPort(port) {
-    waypoints[wpIndex] = { point: { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode } };
-    input.value = `${port.name} (${port.locode})`;
-    closeDropdown();
-  }
+  const debounceMs = opts.debounce || 300;
+  const onClear = opts.onClear || null;
 
   input.addEventListener('input', () => {
     clearTimeout(debounceTimer);
-    waypoints[wpIndex] = { point: null };
+    if (onClear) onClear();
     const q = input.value.trim();
-    if (!q) { closeDropdown(); return; }
+    if (q.length < 1) { dropdown.innerHTML = ''; dropdown.classList.remove('open'); return; }
     debounceTimer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=10`);
-        const results = await res.json();
-        openDropdown(results);
-      } catch { /* ignore */ }
-    }, 300);
+        const res = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=8`);
+        const ports = await res.json();
+        if (!ports.length) { dropdown.innerHTML = ''; dropdown.classList.remove('open'); return; }
+        dropdown.innerHTML = '';
+        ports.forEach(port => {
+          const div = document.createElement('div');
+          div.className = 'dropdown-item';
+          div.innerHTML = `
+            <span class="di-locode">${escHtml(port.locode)}</span>
+            <div class="di-info">
+              <div class="di-name">${escHtml(port.name)}</div>
+              <div class="di-country">${escHtml(port.country)}</div>
+            </div>`;
+          div.addEventListener('mousedown', e => { e.preventDefault(); onSelect(port); dropdown.innerHTML = ''; dropdown.classList.remove('open'); });
+          dropdown.appendChild(div);
+        });
+        dropdown.classList.add('open');
+      } catch { dropdown.innerHTML = ''; dropdown.classList.remove('open'); }
+    }, debounceMs);
   });
 
+  // Keyboard navigation
   input.addEventListener('keydown', e => {
-    if (!dropdown.classList.contains('open')) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setFocus(Math.min(focusedIdx + 1, items.length - 1)); }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); setFocus(Math.max(focusedIdx - 1, 0)); }
-    if (e.key === 'Enter')     { if (focusedIdx >= 0) selectPort(items[focusedIdx]); }
-    if (e.key === 'Escape')    { closeDropdown(); }
+    const items = dropdown.querySelectorAll('.dropdown-item');
+    if (!items.length) return;
+    const active = dropdown.querySelector('.dropdown-item.active');
+    let idx = active ? [...items].indexOf(active) : -1;
+    if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(idx + 1, items.length - 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(idx - 1, 0); }
+    else if (e.key === 'Enter' && active) { e.preventDefault(); active.dispatchEvent(new Event('mousedown')); return; }
+    else if (e.key === 'Escape') { dropdown.innerHTML = ''; dropdown.classList.remove('open'); return; }
+    else return;
+    items.forEach(i => i.classList.remove('active'));
+    if (items[idx]) { items[idx].classList.add('active'); items[idx].scrollIntoView({ block: 'nearest' }); }
   });
 
-  document.addEventListener('click', e => {
-    if (!input.contains(e.target) && !dropdown.contains(e.target)) closeDropdown();
+  // Close on blur
+  input.addEventListener('blur', () => {
+    setTimeout(() => { dropdown.innerHTML = ''; dropdown.classList.remove('open'); }, 200);
+  });
+}
+
+// ── Waypoint Autocomplete (Voyage Mode) ───────────────────────────────────
+function setupWaypointAutocomplete(input, dropdown, wpIndex) {
+  createPortAutocomplete(input, dropdown, (port) => {
+    waypoints[wpIndex] = { point: { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode } };
+    input.value = `${port.name} (${port.locode})`;
+  }, {
+    onClear: () => { waypoints[wpIndex] = { point: null }; },
   });
 }
 
@@ -382,6 +375,8 @@ function renderVoyageRoute(data) {
 function renderVoyageResults(data) {
   const resultsDiv = $('voyage-results');
   resultsDiv.classList.remove('hidden');
+  const onboard = $('voyage-onboard');
+  if (onboard) onboard.classList.add('hidden');
 
   const t = data.totals;
   const speed = data.speed_knots;
@@ -462,7 +457,7 @@ function renderVoyageResults(data) {
           const riskCol = advisory.severity === 'SEVERE' ? '#ef5350' : advisory.severity === 'HIGH' ? '#ff9800' : advisory.severity === 'MODERATE' ? '#ffeb3b' : '#4caf50';
           el.innerHTML = `
             <div style="margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;border-left:3px solid ${riskCol}">
-              <div style="font-size:11px;font-weight:600;color:${riskCol};text-transform:uppercase;margin-bottom:4px">Port Congestion at ${escHtml(advisory.name)}</div>
+              <div style="font-size:11px;font-weight:600;color:${riskCol};text-transform:uppercase;margin-bottom:4px">${severityIcon(advisory.severity)} Port Congestion at ${escHtml(advisory.name)}</div>
               <div style="font-size:13px;font-weight:700;color:var(--text)">Expected wait: ${advisory.estimated_wait_hours > 0 ? advisory.estimated_wait_days + ' days' : 'Minimal'}</div>
               <div style="font-size:11px;color:var(--text2);margin-top:4px">${escHtml(advisory.recommendation)}</div>
               <div style="font-size:10px;color:var(--text2);margin-top:2px">Queue: ${advisory.current_queue} vessels · Score: ${advisory.congestion_score}</div>
@@ -570,6 +565,12 @@ function switchMode(mode) {
   if (mode === 'voyage') {
     voyageEl.classList.remove('hidden');
     btnVoyage.classList.add('active');
+    // Show onboarding if no results yet
+    const onboard = $('voyage-onboard');
+    const results = $('voyage-results');
+    if (onboard && results && results.classList.contains('hidden')) {
+      onboard.classList.remove('hidden');
+    }
   } else if (mode === 'portwatch') {
     portwatchEl.classList.remove('hidden');
     btnPortwatch.classList.add('active');
@@ -605,6 +606,12 @@ function levelColor(level) {
 
 function levelClass(level) {
   return `severity-${(level || 'low').toLowerCase()}`;
+}
+
+// Color-blind safe severity icons — secondary encoding beyond color
+function severityIcon(level) {
+  const icons = { SEVERE: '\u26A0', HIGH: '\u25B2', MODERATE: '\u25CF', LOW: '\u2713' };
+  return icons[level] || '';
 }
 
 // ── Sort button wiring ─────────────────────────────────────────────────────
@@ -694,8 +701,12 @@ function renderPortDetail(detail, timeline) {
   $('pd-score-val').textContent = score;
   $('pd-score-val').style.color = color;
 
+  // Update ARIA label for screen readers
+  const scoreRow = $('pd-score-row');
+  if (scoreRow) scoreRow.setAttribute('aria-label', `${s.name || s.port_locode} congestion: ${level}, score ${score}`);
+
   const badge = $('pd-level-badge');
-  badge.textContent = level;
+  badge.textContent = `${severityIcon(level)} ${level}`;
   badge.className   = `pd-level-badge level-${level.toLowerCase()}`;
 
   $('pd-peak-anchored').textContent  = Number(s.peak_anchored) || 0;
@@ -937,7 +948,7 @@ function renderLivePortList(ports) {
       <div class="pli-body">
         <div class="pli-top">
           <div class="pli-name">${escHtml(port.name)}</div>
-          <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${score}${deltaHtml}</div>
+          <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${severityIcon(level)} ${score}${deltaHtml}</div>
         </div>
         <div class="pli-sub">
           <span class="pli-country">${escHtml(port.country || '')} \u00b7 ${escHtml(port.locode)}</span>
@@ -974,7 +985,7 @@ function renderLiveMapMarkers(ports) {
     circle.bindTooltip(`
       <strong>${escHtml(port.name)}</strong><br>
       ${escHtml(port.locode)} \u00b7 ${escHtml(port.country || '')}<br>
-      Score: <strong>${score}</strong> \u00b7 ${escHtml(port.severity || 'LOW')}<br>
+      Score: <strong>${score}</strong> \u00b7 ${severityIcon(port.severity || 'LOW')} ${escHtml(port.severity || 'LOW')}<br>
       Vessels: ${port.total_vessels || 0} (${port.anchored_count || 0} anchored)
     `, { sticky: true, className: 'port-tooltip' });
 
@@ -1050,8 +1061,12 @@ function renderLivePortDetail(detail) {
   $('pd-score-val').textContent = score;
   $('pd-score-val').style.color = color;
 
+  // Update ARIA label for screen readers
+  const scoreRow = $('pd-score-row');
+  if (scoreRow) scoreRow.setAttribute('aria-label', `${detail.name || detail.locode} congestion: ${level}, score ${score}`);
+
   const badge = $('pd-level-badge');
-  badge.textContent = level;
+  badge.textContent = `${severityIcon(level)} ${level}`;
   badge.className = `pd-level-badge level-${level.toLowerCase()}`;
 
   $('pd-peak-anchored').textContent = detail.anchored_count || 0;
@@ -1108,14 +1123,22 @@ function renderLiveVesselDots(vessels) {
     ANCHORED: '#ff9800', BERTHED: '#2196f3', APPROACHING: '#9c27b0', TRANSITING: '#4caf50',
   };
 
+  // Color-blind safe: differentiate vessel states by size, fill, and border
+  const stateStyle = {
+    BERTHED:     { radius: 7, weight: 1.5, fillOpacity: 0.85 },
+    ANCHORED:    { radius: 7, weight: 3,   fillOpacity: 0.3  },
+    APPROACHING: { radius: 5, weight: 1.5, fillOpacity: 0.85 },
+    TRANSITING:  { radius: 4, weight: 1.5, fillOpacity: 0.5  },
+  };
+
   vessels.forEach(v => {
     if (v.lat == null || v.lon == null) return;
 
-    const col  = stateColors[v.state] || '#8b949e';
-    const size = v.state === 'ANCHORED' ? 7 : v.state === 'BERTHED' ? 6 : 5;
+    const col   = stateColors[v.state] || '#8b949e';
+    const style = stateStyle[v.state] || { radius: 5, weight: 1.5, fillOpacity: 0.85 };
 
     const marker = L.circleMarker([v.lat, v.lon], {
-      radius: size, color: '#fff', weight: 1.5, fillColor: col, fillOpacity: 0.85,
+      radius: style.radius, color: '#fff', weight: style.weight, fillColor: col, fillOpacity: style.fillOpacity,
     });
 
     const waitStr = v.wait_hours > 0 ? `<br>Wait: ${v.wait_hours}h` : '';
@@ -1301,71 +1324,11 @@ function renderIntelligence(data) {
   const dropdown = $('finder-port-dropdown');
   if (!input || !dropdown) return;
 
-  let debounceTimer = null;
-  let focusedIdx = -1;
-  let items = [];
-
-  function openDD(results) {
-    items = results;
-    focusedIdx = -1;
-    dropdown.innerHTML = '';
-    if (!results.length) { dropdown.classList.remove('open'); return; }
-    results.forEach((port, i) => {
-      const div = document.createElement('div');
-      div.className = 'dropdown-item';
-      div.innerHTML = `
-        <span class="di-locode">${escHtml(port.locode)}</span>
-        <div class="di-info">
-          <div class="di-name">${escHtml(port.name)}</div>
-          <div class="di-country">${escHtml(port.country)}</div>
-        </div>`;
-      div.addEventListener('mousedown', e => { e.preventDefault(); selectP(port); });
-      dropdown.appendChild(div);
-    });
-    dropdown.classList.add('open');
-  }
-
-  function closeDD() { dropdown.classList.remove('open'); focusedIdx = -1; }
-
-  function setFocus(idx) {
-    const divs = dropdown.querySelectorAll('.dropdown-item');
-    divs.forEach(d => d.classList.remove('focused'));
-    if (idx >= 0 && idx < divs.length) {
-      divs[idx].classList.add('focused');
-      divs[idx].scrollIntoView({ block: 'nearest' });
-    }
-    focusedIdx = idx;
-  }
-
-  function selectP(port) {
+  createPortAutocomplete(input, dropdown, (port) => {
     finderPort = { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode };
     input.value = `${port.name} (${port.locode})`;
-    closeDD();
-  }
-
-  input.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    finderPort = null;
-    const q = input.value.trim();
-    if (!q) { closeDD(); return; }
-    debounceTimer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=10`);
-        openDD(await res.json());
-      } catch { /* ignore */ }
-    }, 300);
-  });
-
-  input.addEventListener('keydown', e => {
-    if (!dropdown.classList.contains('open')) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setFocus(Math.min(focusedIdx + 1, items.length - 1)); }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); setFocus(Math.max(focusedIdx - 1, 0)); }
-    if (e.key === 'Enter')     { if (focusedIdx >= 0) selectP(items[focusedIdx]); }
-    if (e.key === 'Escape')    { closeDD(); }
-  });
-
-  document.addEventListener('click', e => {
-    if (!input.contains(e.target) && !dropdown.contains(e.target)) closeDD();
+  }, {
+    onClear: () => { finderPort = null; },
   });
 })();
 
@@ -1539,6 +1502,11 @@ async function loadVesselDetail(mmsi) {
       $('pd-score-val').textContent = score;
       $('pd-score-val').style.color = color;
 
+      // Update ARIA label for screen readers
+      const scoreRow = $('pd-score-row');
+      const availLabel = score >= 60 ? 'AVAILABLE' : score >= 30 ? 'MAYBE' : 'IN USE';
+      if (scoreRow) scoreRow.setAttribute('aria-label', `${detail.name || detail.mmsi} availability: ${availLabel}, score ${score}`);
+
       const badge = $('pd-level-badge');
       badge.textContent = score >= 60 ? 'AVAILABLE' : score >= 30 ? 'MAYBE' : 'IN USE';
       badge.className = `pd-level-badge ${score >= 60 ? 'level-low' : score >= 30 ? 'level-moderate' : 'level-high'}`;
@@ -1579,29 +1547,11 @@ let selectedWeatherPort = null;
   const dd = document.getElementById('weather-port-dropdown');
   if (!inp || !dd) return;
 
-  let debounce = null;
-  inp.addEventListener('input', () => {
-    clearTimeout(debounce);
-    debounce = setTimeout(async () => {
-      const q = inp.value.trim();
-      if (q.length < 2) { dd.innerHTML = ''; dd.classList.remove('open'); return; }
-      try {
-        const res = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=8`);
-        const ports = await res.json();
-        if (!ports.length) { dd.innerHTML = ''; dd.classList.remove('open'); return; }
-        dd.innerHTML = ports.map(p =>
-          `<div class="dd-item" data-locode="${escHtml(p.locode)}" data-name="${escHtml(p.name)}">${escHtml(p.name)} <span style="color:var(--text2)">${escHtml(p.locode)}</span></div>`
-        ).join('');
-        dd.classList.add('open');
-        dd.querySelectorAll('.dd-item').forEach(item => {
-          item.addEventListener('click', () => {
-            selectedWeatherPort = { locode: item.dataset.locode, name: item.dataset.name };
-            inp.value = item.dataset.name;
-            dd.classList.remove('open');
-          });
-        });
-      } catch (e) { dd.innerHTML = ''; dd.classList.remove('open'); }
-    }, 250);
+  createPortAutocomplete(inp, dd, (port) => {
+    selectedWeatherPort = { locode: port.locode, name: port.name };
+    inp.value = `${port.name} (${port.locode})`;
+  }, {
+    debounce: 250,
   });
 })();
 
@@ -1798,7 +1748,7 @@ function renderMarketIntel(overview, corridor) {
       const pct = Math.round((p.total_vessels / maxV) * 100);
       const severityCol = {'SEVERE': '#ef5350', 'HIGH': '#ff9800', 'MODERATE': '#ffeb3b', 'LOW': '#4caf50'}[p.severity] || '#4caf50';
       html += `<div class="intel-bar-row">
-        <span class="intel-bar-label" title="${p.name}">${p.name.substring(0, 10)}</span>
+        <span class="intel-bar-label" title="${p.name}">${severityIcon(p.severity || 'LOW')} ${p.name.substring(0, 10)}</span>
         <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${pct}%;background:${severityCol}"></div></div>
         <span class="intel-bar-val">${p.total_vessels} (${p.congestion_score})</span>
       </div>`;
@@ -1860,6 +1810,40 @@ function renderMarketIntel(overview, corridor) {
 
   content.innerHTML = html;
 }
+
+// ── Voyage Onboarding ─────────────────────────────────────────────────────
+document.querySelectorAll('.onboard-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const fromLocode = btn.dataset.from;
+    const toLocode   = btn.dataset.to;
+
+    // Look up both ports
+    try {
+      const [fromRes, toRes] = await Promise.all([
+        fetch(`/api/ports/search?q=${encodeURIComponent(fromLocode)}&limit=1`),
+        fetch(`/api/ports/search?q=${encodeURIComponent(toLocode)}&limit=1`),
+      ]);
+      const fromPorts = await fromRes.json();
+      const toPorts   = await toRes.json();
+      if (!fromPorts.length || !toPorts.length) return;
+
+      const fp = fromPorts[0];
+      const tp = toPorts[0];
+
+      // Set waypoints
+      waypoints[0] = { point: { name: fp.name, lat: fp.lat, lon: fp.lon, locode: fp.locode } };
+      waypoints[1] = { point: { name: tp.name, lat: tp.lat, lon: tp.lon, locode: tp.locode } };
+
+      // Fill inputs
+      const inputs = document.querySelectorAll('#waypoints-container .wp-search');
+      if (inputs[0]) inputs[0].value = `${fp.name} (${fp.locode})`;
+      if (inputs[1]) inputs[1].value = `${tp.name} (${tp.locode})`;
+
+      // Trigger calculation
+      ui.calcBtn.click();
+    } catch { /* ignore */ }
+  });
+});
 
 // ── Boot into Port Watch mode ────────────────────────────────────────────
 switchMode('portwatch');

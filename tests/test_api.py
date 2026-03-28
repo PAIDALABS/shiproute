@@ -3,6 +3,11 @@ API integration tests using FastAPI's TestClient.
 
 Only tests endpoints that work with the in-memory CongestionEngine
 (no external Datalastic / database calls required).
+
+NOTE: The module-level ``client`` shares a single CongestionEngine
+instance (the one created at ``main`` import time).  Tests that only
+*read* state are safe; tests that *write* vessels should use the
+shared fixtures from ``conftest.py`` instead.
 """
 
 import pytest
@@ -178,3 +183,39 @@ def test_alerts_endpoint():
     assert resp.status_code == 200
     data = resp.json()
     assert "alerts" in data
+
+
+# ---------------------------------------------------------------------------
+# Response-shape validation
+# ---------------------------------------------------------------------------
+
+
+def test_live_congestion_response_structure():
+    """Verify each port in the live congestion response has the expected fields."""
+    resp = client.get("/api/congestion/live")
+    data = resp.json()
+    for port in data["ports"]:
+        assert "locode" in port
+        assert "name" in port
+        assert "congestion_score" in port
+        assert "severity" in port
+        assert "total_vessels" in port
+        assert "anchored_count" in port
+        assert "avg_wait_hours" in port
+        assert "score_delta_24h" in port
+
+
+def test_health_returns_ok():
+    """Health endpoint returns an ok or degraded status."""
+    resp = client.get("/health")
+    data = resp.json()
+    assert data["status"] in ("ok", "degraded")
+
+
+def test_live_status_endpoint():
+    """Live status endpoint returns vessel tracking metadata."""
+    resp = client.get("/api/congestion/live/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "total_vessels_tracked" in data
+    assert "monitored_ports" in data

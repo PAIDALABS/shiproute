@@ -9,6 +9,9 @@ import httpx
 MARINE_API = "https://marine-api.open-meteo.com/v1/marine"
 WEATHER_API = "https://api.open-meteo.com/v1/forecast"
 
+# Limit concurrent Open-Meteo requests to avoid rate limiting
+_API_SEMAPHORE = asyncio.Semaphore(5)
+
 
 def _risk_level(wave_height_m: float, wind_speed_kts: float) -> str:
     if wave_height_m > 6 or wind_speed_kts > 45:
@@ -151,104 +154,105 @@ async def get_route_weather(
 
 async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float, eta: datetime | None = None) -> dict | None:
     """Fetch marine weather for a single point, at the forecast hour closest to ETA."""
-    try:
-        wind_data = {}
-        # Determine if we need forecast or current
-        use_forecast = False
-        if eta:
-            hours_ahead = (eta - datetime.now(timezone.utc)).total_seconds() / 3600
-            if hours_ahead > 168:
-                return {
-                    "wave_height_m": 0, "wave_direction": 0, "wave_period_s": 0,
-                    "wind_wave_height_m": 0, "swell_height_m": 0, "wind_speed_kts": 0,
-                    "forecast": False, "beyond_forecast": True,
-                }
-            use_forecast = hours_ahead > 0
-        else:
+    async with _API_SEMAPHORE:
+        try:
+            wind_data = {}
+            # Determine if we need forecast or current
             use_forecast = False
+            if eta:
+                hours_ahead = (eta - datetime.now(timezone.utc)).total_seconds() / 3600
+                if hours_ahead > 168:
+                    return {
+                        "wave_height_m": 0, "wave_direction": 0, "wave_period_s": 0,
+                        "wind_wave_height_m": 0, "swell_height_m": 0, "wind_speed_kts": 0,
+                        "forecast": False, "beyond_forecast": True,
+                    }
+                use_forecast = hours_ahead > 0
+            else:
+                use_forecast = False
 
-        if use_forecast:
-            # Fetch hourly forecast for the ETA date
-            forecast_date = eta.strftime("%Y-%m-%d")
-            resp = await client.get(WEATHER_API, params={
-                "latitude": lat,
-                "longitude": lon,
-                "hourly": "wind_speed_10m",
-                "wind_speed_unit": "kn",
-                "start_date": forecast_date,
-                "end_date": forecast_date,
-                "timezone": "UTC",
-            }, timeout=10)
-            if resp.status_code == 200:
+            if use_forecast:
+                # Fetch hourly forecast for the ETA date
+                forecast_date = eta.strftime("%Y-%m-%d")
+                resp = await client.get(WEATHER_API, params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "hourly": "wind_speed_10m",
+                    "wind_speed_unit": "kn",
+                    "start_date": forecast_date,
+                    "end_date": forecast_date,
+                    "timezone": "UTC",
+                }, timeout=10)
+                if resp.status_code == 200:
+                    hourly = resp.json().get("hourly", {})
+                    times = hourly.get("time", [])
+                    winds = hourly.get("wind_speed_10m", [])
+                    # Find closest hour to ETA
+                    eta_hour = eta.strftime("%Y-%m-%dT%H:00")
+                    for i, t in enumerate(times):
+                        if t >= eta_hour and i < len(winds):
+                            wind_data["wind_speed_kts"] = winds[i] or 0
+                            break
+                    if "wind_speed_kts" not in wind_data and winds:
+                        wind_data["wind_speed_kts"] = winds[-1] or 0
+
+                resp = await client.get(MARINE_API, params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "hourly": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
+                    "start_date": forecast_date,
+                    "end_date": forecast_date,
+                    "timezone": "UTC",
+                }, timeout=10)
+                if resp.status_code != 200:
+                    return None
                 hourly = resp.json().get("hourly", {})
                 times = hourly.get("time", [])
-                winds = hourly.get("wind_speed_10m", [])
-                # Find closest hour to ETA
-                eta_hour = eta.strftime("%Y-%m-%dT%H:00")
+                # Find closest hour
+                idx = 0
                 for i, t in enumerate(times):
-                    if t >= eta_hour and i < len(winds):
-                        wind_data["wind_speed_kts"] = winds[i] or 0
+                    if t >= eta_hour:
+                        idx = i
                         break
-                if "wind_speed_kts" not in wind_data and winds:
-                    wind_data["wind_speed_kts"] = winds[-1] or 0
+                data = {
+                    "wave_height": (hourly.get("wave_height") or [0])[min(idx, len(hourly.get("wave_height", [0])) - 1)],
+                    "wave_direction": (hourly.get("wave_direction") or [0])[min(idx, len(hourly.get("wave_direction", [0])) - 1)],
+                    "wave_period": (hourly.get("wave_period") or [0])[min(idx, len(hourly.get("wave_period", [0])) - 1)],
+                    "wind_wave_height": (hourly.get("wind_wave_height") or [0])[min(idx, len(hourly.get("wind_wave_height", [0])) - 1)],
+                    "swell_wave_height": (hourly.get("swell_wave_height") or [0])[min(idx, len(hourly.get("swell_wave_height", [0])) - 1)],
+                }
+            else:
+                # Current conditions (for departure point or beyond forecast range)
+                resp = await client.get(WEATHER_API, params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current": "wind_speed_10m",
+                    "wind_speed_unit": "kn",
+                }, timeout=10)
+                if resp.status_code == 200:
+                    wc = resp.json().get("current", {})
+                    wind_data["wind_speed_kts"] = wc.get("wind_speed_10m") or 0
 
-            resp = await client.get(MARINE_API, params={
-                "latitude": lat,
-                "longitude": lon,
-                "hourly": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
-                "start_date": forecast_date,
-                "end_date": forecast_date,
-                "timezone": "UTC",
-            }, timeout=10)
-            if resp.status_code != 200:
-                return None
-            hourly = resp.json().get("hourly", {})
-            times = hourly.get("time", [])
-            # Find closest hour
-            idx = 0
-            for i, t in enumerate(times):
-                if t >= eta_hour:
-                    idx = i
-                    break
-            data = {
-                "wave_height": (hourly.get("wave_height") or [0])[min(idx, len(hourly.get("wave_height", [0])) - 1)],
-                "wave_direction": (hourly.get("wave_direction") or [0])[min(idx, len(hourly.get("wave_direction", [0])) - 1)],
-                "wave_period": (hourly.get("wave_period") or [0])[min(idx, len(hourly.get("wave_period", [0])) - 1)],
-                "wind_wave_height": (hourly.get("wind_wave_height") or [0])[min(idx, len(hourly.get("wind_wave_height", [0])) - 1)],
-                "swell_wave_height": (hourly.get("swell_wave_height") or [0])[min(idx, len(hourly.get("swell_wave_height", [0])) - 1)],
+                resp = await client.get(MARINE_API, params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
+                }, timeout=10)
+                if resp.status_code != 200:
+                    return None
+                data = resp.json().get("current", {})
+
+            return {
+                "wave_height_m": data.get("wave_height") or 0,
+                "wave_direction": data.get("wave_direction") or 0,
+                "wave_period_s": data.get("wave_period") or 0,
+                "wind_wave_height_m": data.get("wind_wave_height") or 0,
+                "swell_height_m": data.get("swell_wave_height") or 0,
+                "wind_speed_kts": wind_data.get("wind_speed_kts", 0),
+                "forecast": use_forecast,
             }
-        else:
-            # Current conditions (for departure point or beyond forecast range)
-            resp = await client.get(WEATHER_API, params={
-                "latitude": lat,
-                "longitude": lon,
-                "current": "wind_speed_10m",
-                "wind_speed_unit": "kn",
-            }, timeout=10)
-            if resp.status_code == 200:
-                wc = resp.json().get("current", {})
-                wind_data["wind_speed_kts"] = wc.get("wind_speed_10m") or 0
-
-            resp = await client.get(MARINE_API, params={
-                "latitude": lat,
-                "longitude": lon,
-                "current": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
-            }, timeout=10)
-            if resp.status_code != 200:
-                return None
-            data = resp.json().get("current", {})
-
-        return {
-            "wave_height_m": data.get("wave_height") or 0,
-            "wave_direction": data.get("wave_direction") or 0,
-            "wave_period_s": data.get("wave_period") or 0,
-            "wind_wave_height_m": data.get("wind_wave_height") or 0,
-            "swell_height_m": data.get("swell_wave_height") or 0,
-            "wind_speed_kts": wind_data.get("wind_speed_kts", 0),
-            "forecast": use_forecast,
-        }
-    except Exception:
-        return None
+        except Exception:
+            return None
 
 
 async def get_port_weather(lat: float, lon: float) -> dict:

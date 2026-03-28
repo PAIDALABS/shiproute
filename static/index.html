@@ -39,6 +39,17 @@
         </div>
       </div>
 
+      <!-- Onboarding empty state -->
+      <div id="voyage-onboard" class="onboard-box">
+        <div class="onboard-title">Plan a Voyage</div>
+        <div class="onboard-subtitle">Enter ports or try an example:</div>
+        <div class="onboard-examples">
+          <button class="onboard-btn" data-from="INKAN" data-to="KEMBA">Kandla &rarr; Mombasa</button>
+          <button class="onboard-btn" data-from="INMUN" data-to="TZDAR">Mundra &rarr; Dar es Salaam</button>
+          <button class="onboard-btn" data-from="NLRTM" data-to="DEHAM">Rotterdam &rarr; Hamburg</button>
+        </div>
+      </div>
+
       <!-- Waypoints list -->
       <div id="waypoints-container">
         <div class="waypoint-block" data-wp-idx="0">
@@ -128,7 +139,7 @@
         <button class="sort-btn" data-sort="vessels">Vessels</button>
         <button class="sort-btn" data-sort="name">Name</button>
       </div>
-      <div id="live-port-list"></div>
+      <div id="live-port-list" aria-live="polite"></div>
     </div><!-- /#portwatch-mode -->
 
     <!-- ── Vessel Finder Mode ─────────────────────────────────────────── -->
@@ -213,7 +224,7 @@
     </div>
 
     <!-- Score ring + level -->
-    <div class="pd-score-row">
+    <div class="pd-score-row" id="pd-score-row" role="status" aria-label="Congestion score">
       <div class="pd-score-ring-wrap">
         <svg class="pd-score-ring" viewBox="0 0 80 80">
           <circle class="ring-track" cx="40" cy="40" r="32" />

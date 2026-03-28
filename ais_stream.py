@@ -27,6 +27,30 @@ DATALASTIC_BASE_URL = "https://api.datalastic.com/api/v0/vessel_inradius"
 POLL_INTERVAL_SECONDS = 120
 PRUNE_INTERVAL_SECONDS = 300  # 5 minutes
 
+# Map Datalastic navigational-status strings to AIS numeric codes
+_NAV_STATUS_MAP = {
+    "under way using engine": 0,
+    "at anchor": 1,
+    "not under command": 2,
+    "restricted manoeuvrability": 3,
+    "constrained by her draught": 4,
+    "moored": 5,
+    "aground": 6,
+    "engaged in fishing": 7,
+    "under way sailing": 8,
+}
+
+
+def _parse_nav_status(raw) -> int | None:
+    """Convert a raw navigational-status value to an AIS numeric code."""
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        return _NAV_STATUS_MAP.get(raw.lower().strip())
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Parse Datalastic vessel into engine format
@@ -36,7 +60,7 @@ def _parse_vessel(vessel: dict) -> dict | None:
     """Convert a Datalastic vessel dict into CongestionEngine update params."""
     try:
         mmsi = int(vessel.get("mmsi", 0))
-        if mmsi == 0:
+        if not mmsi or not (200000000 <= mmsi <= 799999999):
             return None
 
         lat = vessel.get("lat")
@@ -51,7 +75,9 @@ def _parse_vessel(vessel: dict) -> dict | None:
             "speed": float(vessel.get("speed", 0) or 0),
             "course": float(vessel.get("course", 0) or 0),
             "heading": int(vessel.get("heading", 0) or 0),
-            "nav_status": None,
+            "nav_status": _parse_nav_status(
+                vessel.get("navigational_status") or vessel.get("nav_status")
+            ),
             "ship_type": vessel.get("type"),
             "name": (vessel.get("name") or "").strip() or None,
             "timestamp": time.time(),
