@@ -31,7 +31,7 @@ def get_market_overview(engine: CongestionEngine) -> dict:
             "berthed": metrics["berthed_count"],
             "congestion_score": metrics["congestion_score"],
             "severity": metrics["severity"],
-            "dominant_type": max(type_counts.items(), key=lambda x: x[1])[0] if type_counts else "N/A",
+            "dominant_type": max(type_counts.items(), key=lambda x: x[1])[0] if len(type_counts) > 0 else "N/A",
             "africa_trade_vessels": africa_count,
             "vessel_types": dict(type_counts),
         })

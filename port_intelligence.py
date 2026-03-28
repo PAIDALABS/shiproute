@@ -22,6 +22,7 @@ import asyncio
 import math
 import time
 from collections import Counter
+from datetime import datetime
 
 import httpx
 
@@ -153,7 +154,7 @@ async def enrich_with_specs(vessels: list[dict], api_key: str, max_vessels: int 
         yb = s.get("year_built")
         if yb:
             try:
-                age = 2026 - int(yb)
+                age = datetime.now().year - int(yb)
                 if 0 < age < 80:
                     ages.append(age)
             except (ValueError, TypeError):

@@ -136,7 +136,7 @@ PORTS = [
     # South America
     {"id": "brssz", "name": "Santos", "country": "Brazil", "locode": "BRSSZ", "lat": -23.96, "lon": -46.33},
     {"id": "brrec", "name": "Recife", "country": "Brazil", "locode": "BRREC", "lat": -8.06, "lon": -34.87},
-    {"id": "brrig", "name": "Rio de Janeiro", "country": "Brazil", "locode": "BRREC", "lat": -22.90, "lon": -43.17},
+    {"id": "brrig", "name": "Rio de Janeiro", "country": "Brazil", "locode": "BRRIO", "lat": -22.90, "lon": -43.17},
     {"id": "arbue", "name": "Buenos Aires", "country": "Argentina", "locode": "ARBUE", "lat": -34.61, "lon": -58.37},
     {"id": "clvap", "name": "Valparaiso", "country": "Chile", "locode": "CLVAP", "lat": -33.04, "lon": -71.62},
     {"id": "pecll", "name": "Callao (Lima)", "country": "Peru", "locode": "PECLL", "lat": -12.05, "lon": -77.14},

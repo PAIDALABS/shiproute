@@ -213,8 +213,9 @@ async def compute_cargo_flow(
                                 was_outside = False
                             # Mark daily presence
                             day_key = datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d")
+                            if mmsi not in daily_occupancy[day_key]["vessels"]:
+                                daily_occupancy[day_key]["est_tonnes"] += est_cargo
                             daily_occupancy[day_key]["vessels"].add(mmsi)
-                            daily_occupancy[day_key]["est_tonnes"] += est_cargo
                         else:
                             was_outside = True
 

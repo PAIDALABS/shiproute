@@ -76,10 +76,10 @@ function setupWaypointAutocomplete(input, dropdown, wpIndex) {
       const div = document.createElement('div');
       div.className = 'dropdown-item';
       div.innerHTML = `
-        <span class="di-locode">${port.locode}</span>
+        <span class="di-locode">${escHtml(port.locode)}</span>
         <div class="di-info">
-          <div class="di-name">${port.name}</div>
-          <div class="di-country">${port.country}</div>
+          <div class="di-name">${escHtml(port.name)}</div>
+          <div class="di-country">${escHtml(port.country)}</div>
         </div>`;
       div.addEventListener('mousedown', e => { e.preventDefault(); selectPort(port); });
       dropdown.appendChild(div);
@@ -299,6 +299,7 @@ ui.calcBtn.addEventListener('click', async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Server error');
 
+    lastRouteData = data;
     renderVoyageRoute(data);
     renderVoyageResults(data);
   } catch (err) {
@@ -341,7 +342,7 @@ function renderVoyageRoute(data) {
           .setContent(`
             <div class="rt-row"><span class="rt-dot" style="background:${color}"></span>
             <span class="rt-label">Leg ${leg.leg}</span>
-            <span class="rt-val">${leg.origin.name} &rarr; ${leg.destination.name}</span></div>
+            <span class="rt-val">${escHtml(leg.origin.name)} &rarr; ${escHtml(leg.destination.name)}</span></div>
             <hr class="rt-divider"/>
             <div class="rt-row"><span class="rt-dot" style="background:#26a69a"></span>
             <span class="rt-label">From start</span><span class="rt-val">${elapsedNmi.toFixed(0)} nmi</span></div>
@@ -394,7 +395,7 @@ function renderVoyageResults(data) {
 
   // Summary
   $('voyage-summary').innerHTML = `
-    <div class="stats-route-label">${data.legs.map(l => l.origin.name).concat([data.legs[data.legs.length - 1].destination.name]).join(' &rarr; ')}</div>
+    <div class="stats-route-label">${data.legs.map(l => escHtml(l.origin.name)).concat([escHtml(data.legs[data.legs.length - 1].destination.name)]).join(' &rarr; ')}</div>
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-value">${Number(t.distance_nmi).toLocaleString()} nmi</div>
@@ -461,9 +462,9 @@ function renderVoyageResults(data) {
           const riskCol = advisory.severity === 'SEVERE' ? '#ef5350' : advisory.severity === 'HIGH' ? '#ff9800' : advisory.severity === 'MODERATE' ? '#ffeb3b' : '#4caf50';
           el.innerHTML = `
             <div style="margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;border-left:3px solid ${riskCol}">
-              <div style="font-size:11px;font-weight:600;color:${riskCol};text-transform:uppercase;margin-bottom:4px">Port Congestion at ${advisory.name}</div>
+              <div style="font-size:11px;font-weight:600;color:${riskCol};text-transform:uppercase;margin-bottom:4px">Port Congestion at ${escHtml(advisory.name)}</div>
               <div style="font-size:13px;font-weight:700;color:var(--text)">Expected wait: ${advisory.estimated_wait_hours > 0 ? advisory.estimated_wait_days + ' days' : 'Minimal'}</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:4px">${advisory.recommendation}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">${escHtml(advisory.recommendation)}</div>
               <div style="font-size:10px;color:var(--text2);margin-top:2px">Queue: ${advisory.current_queue} vessels · Score: ${advisory.congestion_score}</div>
             </div>`;
         }
@@ -503,7 +504,7 @@ function makeIcon(color, symbol) {
 }
 
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
@@ -559,6 +560,8 @@ function switchMode(mode) {
   // Clear map overlays
   portMarkers.clearLayers();
   finderMarkers.clearLayers();
+  if (weatherRouteMarkers) weatherRouteMarkers.clearLayers();
+  if (weatherPortMarkers) weatherPortMarkers.clearLayers();
   if (finderTrackLayer) { finderTrackLayer.remove(); finderTrackLayer = null; }
   closePortDetail();
   if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
@@ -1288,10 +1291,10 @@ function renderIntelligence(data) {
       const div = document.createElement('div');
       div.className = 'dropdown-item';
       div.innerHTML = `
-        <span class="di-locode">${port.locode}</span>
+        <span class="di-locode">${escHtml(port.locode)}</span>
         <div class="di-info">
-          <div class="di-name">${port.name}</div>
-          <div class="di-country">${port.country}</div>
+          <div class="di-name">${escHtml(port.name)}</div>
+          <div class="di-country">${escHtml(port.country)}</div>
         </div>`;
       div.addEventListener('mousedown', e => { e.preventDefault(); selectP(port); });
       dropdown.appendChild(div);
@@ -1564,7 +1567,7 @@ let selectedWeatherPort = null;
         const ports = await res.json();
         if (!ports.length) { dd.innerHTML = ''; dd.classList.remove('open'); return; }
         dd.innerHTML = ports.map(p =>
-          `<div class="dd-item" data-locode="${p.locode}" data-name="${p.name}">${p.name} <span style="color:var(--text2)">${p.locode}</span></div>`
+          `<div class="dd-item" data-locode="${escHtml(p.locode)}" data-name="${escHtml(p.name)}">${escHtml(p.name)} <span style="color:var(--text2)">${escHtml(p.locode)}</span></div>`
         ).join('');
         dd.classList.add('open');
         dd.querySelectorAll('.dd-item').forEach(item => {
@@ -1640,7 +1643,7 @@ function renderPortWeather(data) {
 
 // Route weather
 document.getElementById('weather-route-btn')?.addEventListener('click', async () => {
-  if (!routeLayer) {
+  if (!routeLayer && !lastRouteData) {
     document.getElementById('weather-route-result').innerHTML = '<div class="vessel-empty">Calculate a voyage first in the Voyage tab.</div>';
     return;
   }
@@ -1649,7 +1652,7 @@ document.getElementById('weather-route-btn')?.addEventListener('click', async ()
   el.innerHTML = '<div class="vessel-empty">Checking weather along route...</div>';
 
   // Get the route GeoJSON from the last calculated route
-  const routeGeoJSON = routeLayer.toGeoJSON();
+  const routeGeoJSON = routeLayer ? routeLayer.toGeoJSON() : { type: 'FeatureCollection', features: lastRouteData.legs.map(l => l.route) };
   const speed = parseFloat(document.getElementById('speed-input')?.value) || 14;
 
   try {
@@ -1820,8 +1823,8 @@ function renderMarketIntel(overview, corridor) {
     html += '<div style="margin-top:6px">';
     corridor.vessels.slice(0, 15).forEach(v => {
       html += `<div class="intel-lead">
-        <div class="intel-lead-name">${v.name || v.mmsi}</div>
-        <div class="intel-lead-detail">${v.type} · ${v.state} at ${v.port}${v.destination ? ' → ' + v.destination : ''}</div>
+        <div class="intel-lead-name">${escHtml(v.name || String(v.mmsi))}</div>
+        <div class="intel-lead-detail">${escHtml(v.type)} · ${escHtml(v.state)} at ${escHtml(v.port)}${v.destination ? ' → ' + escHtml(v.destination) : ''}</div>
       </div>`;
     });
     html += '</div></div>';

@@ -1,7 +1,9 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 import searoute as sr
@@ -33,14 +35,34 @@ DB_CONFIG = {
 def get_db():
     return psycopg2.connect(**DB_CONFIG)
 
-app = FastAPI(title="ShipRoute")
+
+@asynccontextmanager
+async def lifespan(app):
+    task = asyncio.create_task(run_ais_stream(engine))
+    snapshot_task = asyncio.create_task(_snapshot_loop())
+    yield
+    task.cancel()
+    snapshot_task.cancel()
+
+app = FastAPI(title="ShipRoute", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=os.getenv("ALLOWED_ORIGINS", "*").split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 ports = PortsLoader()
 
@@ -116,6 +138,7 @@ def calculate_route(req: RouteRequest):
 @app.get("/api/congestion")
 def get_all_congestion(min_vessels: int = Query(default=1)):
     """Return congestion metrics for all ports, sorted by severity."""
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -143,10 +166,15 @@ def get_all_congestion(min_vessels: int = Query(default=1)):
         """, (min_vessels,))
         rows = cur.fetchall()
         cur.close()
-        conn.close()
         return {"ports": [dict(r) for r in rows], "count": len(rows)}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.exception("Database error in get_all_congestion")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
 
 
 # ── Cargo Flow Analysis ───────────────────────────────────────────────────────
@@ -201,9 +229,9 @@ def calculate_multi_route(req: MultiRouteRequest):
 @app.get("/api/vessels/search")
 async def api_vessel_search(
     locode: str = Query(default=""),
-    lat: float = Query(default=None),
-    lon: float = Query(default=None),
-    radius: float = Query(default=15),
+    lat: float = Query(default=None, ge=-90, le=90),
+    lon: float = Query(default=None, ge=-180, le=180),
+    radius: float = Query(default=15, gt=0, le=100),
     type: str = Query(default=""),
     idle_only: bool = Query(default=False),
     africa_only: bool = Query(default=False),
@@ -243,7 +271,7 @@ async def api_vessel_detail(mmsi: int):
 
 
 @app.get("/api/vessels/{mmsi}/track")
-async def api_vessel_track(mmsi: int, days: int = Query(default=30, le=30)):
+async def api_vessel_track(mmsi: int, days: int = Query(default=30, ge=1, le=30)):
     """Get vessel 30-day position history with GeoJSON track."""
     from ais_stream import DATALASTIC_API_KEY
     track = await get_vessel_track(DATALASTIC_API_KEY, mmsi, days)
@@ -370,6 +398,19 @@ def get_live_congestion():
 def get_live_status():
     """Return AIS Stream connection health."""
     return engine.get_status()
+
+
+@app.get("/health")
+def health_check():
+    """Health check for load balancers and monitoring."""
+    status = engine.get_status()
+    healthy = status["total_vessels_tracked"] > 0 or not engine.stream_connected
+    return {
+        "status": "ok" if healthy else "degraded",
+        "vessels_tracked": status["total_vessels_tracked"],
+        "stream_connected": status["stream_connected"],
+        "monitored_ports": status["monitored_ports"],
+    }
 
 
 @app.get("/api/congestion/live/{locode}/intelligence")
@@ -557,7 +598,7 @@ async def get_live_cargo(locode: str):
                     "draught_max": draught_max,
                     "load_pct": load_pct,
                     "est_cargo_tonnes": est_cargo_tonnes,
-                    "destination": v.get("name"),
+                    "destination": v.get("destination"),
                     "year_built": info.get("year_built"),
                 })
                 await asyncio.sleep(0.2)  # rate limit
@@ -855,22 +896,29 @@ ORDER BY congestion_score DESC
 @app.get("/api/congestion/v2")
 def get_all_congestion_v2():
     """Return v2 congestion metrics (peak concurrent counts) for all ports, sorted by severity."""
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(_CONGESTION_V2_SQL)
         rows = cur.fetchall()
         cur.close()
-        conn.close()
         return {"ports": [dict(r) for r in rows], "count": len(rows)}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.exception("Database error in get_all_congestion_v2")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get("/api/congestion/v2/{locode}")
 def get_port_congestion_v2(locode: str):
     """Return v2 congestion detail for a specific port, including vessel list and state breakdown."""
     locode_upper = locode.upper()
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -986,7 +1034,6 @@ def get_port_congestion_v2(locode: str):
         breakdown = cur.fetchall()
 
         cur.close()
-        conn.close()
         return {
             "summary": dict(summary),
             "vessels": [dict(v) for v in vessels],
@@ -995,7 +1042,11 @@ def get_port_congestion_v2(locode: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.exception("Database error in get_port_congestion_v2")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
 
 
 # ── Port Congestion (v1) per-port ─────────────────────────────────────────────
@@ -1003,6 +1054,7 @@ def get_port_congestion_v2(locode: str):
 @app.get("/api/congestion/{locode}")
 def get_port_congestion(locode: str):
     """Return detailed congestion data for a specific port."""
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -1058,7 +1110,6 @@ def get_port_congestion(locode: str):
         breakdown = cur.fetchall()
 
         cur.close()
-        conn.close()
         return {
             "summary": dict(summary),
             "vessels": [dict(v) for v in vessels],
@@ -1067,12 +1118,17 @@ def get_port_congestion(locode: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.exception("Database error in get_port_congestion")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get("/api/congestion/{locode}/timeline")
 def get_port_timeline(locode: str):
     """Return anchor queue depth over time for a port."""
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -1090,18 +1146,15 @@ def get_port_timeline(locode: str):
         """, (locode.upper(),))
         rows = cur.fetchall()
         cur.close()
-        conn.close()
         return {"timeline": [dict(r) for r in rows]}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ── AIS Stream background task ────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def start_ais_stream():
-    asyncio.create_task(run_ais_stream(engine))
-    asyncio.create_task(_snapshot_loop())
+        logging.exception("Database error in get_port_timeline")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if conn:
+            conn.close()
 
 
 async def _snapshot_loop():
@@ -1111,7 +1164,7 @@ async def _snapshot_loop():
         try:
             save_daily_snapshot(engine)
         except Exception:
-            pass
+            logging.exception("Failed to save daily cargo snapshot")
 
 
 # ── Static files ──────────────────────────────────────────────────────────────

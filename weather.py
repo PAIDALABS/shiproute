@@ -21,7 +21,7 @@ def _risk_level(wave_height_m: float, wind_speed_kts: float) -> str:
 
 
 def _risk_color(level: str) -> str:
-    return {"SEVERE": "#ef5350", "HIGH": "#ff9800", "MODERATE": "#ffeb3b", "LOW": "#4caf50"}[level]
+    return {"SEVERE": "#ef5350", "HIGH": "#ff9800", "MODERATE": "#ffeb3b", "LOW": "#4caf50"}.get(level, "#8b949e")
 
 
 def _sample_points_along_route(route_geojson: dict, num_points: int = 20) -> list[dict]:
@@ -143,11 +143,21 @@ async def get_route_weather(
 async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float) -> dict | None:
     """Fetch current marine weather for a single point."""
     try:
+        resp = await client.get(WEATHER_API, params={
+            "latitude": lat,
+            "longitude": lon,
+            "current": "wind_speed_10m",
+            "wind_speed_unit": "kn",
+        }, timeout=10)
+        wind_data = {}
+        if resp.status_code == 200:
+            wc = resp.json().get("current", {})
+            wind_data["wind_speed_kts"] = wc.get("wind_speed_10m") or 0
+
         resp = await client.get(MARINE_API, params={
             "latitude": lat,
             "longitude": lon,
             "current": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
-            "wind_speed_unit": "kn",
         }, timeout=10)
         if resp.status_code != 200:
             return None
@@ -158,6 +168,7 @@ async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float)
             "wave_period_s": data.get("wave_period") or 0,
             "wind_wave_height_m": data.get("wind_wave_height") or 0,
             "swell_height_m": data.get("swell_wave_height") or 0,
+            "wind_speed_kts": wind_data.get("wind_speed_kts", 0),
         }
     except Exception:
         return None

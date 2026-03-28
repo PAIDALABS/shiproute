@@ -5,6 +5,7 @@ Receives vessel position updates (from AIS stream), classifies vessel state,
 and computes per-port congestion metrics.
 """
 
+import asyncio
 import math
 import time
 from typing import Optional
@@ -169,6 +170,8 @@ class CongestionEngine:
         }
         # Reverse lookup: mmsi -> locode (a vessel can only be in one port)
         self._vessel_port: dict[int, str] = {}
+        # Guards concurrent read/write access from background poller vs request handlers
+        self._lock = asyncio.Lock()
 
         # Completed port visits for turnaround analysis
         # {locode: [visit_dict, ...]}
@@ -283,11 +286,11 @@ class CongestionEngine:
             "anchor_hours": anchor_hours,
             "berth_hours": berth_hours,
             # Intelligence fields
-            "country_iso": country_iso or (existing["country_iso"] if existing else None),
-            "type_specific": type_specific or (existing["type_specific"] if existing else None),
-            "destination": destination or (existing["destination"] if existing else None),
-            "eta_epoch": eta_epoch or (existing["eta_epoch"] if existing else None),
-            "imo": imo or (existing["imo"] if existing else None),
+            "country_iso": country_iso if country_iso is not None else (existing["country_iso"] if existing else None),
+            "type_specific": type_specific if type_specific is not None else (existing["type_specific"] if existing else None),
+            "destination": destination if destination is not None else (existing["destination"] if existing else None),
+            "eta_epoch": eta_epoch if eta_epoch is not None else (existing["eta_epoch"] if existing else None),
+            "imo": imo if imo is not None else (existing["imo"] if existing else None),
         }
 
         self._port_vessels[target_locode][mmsi] = vessel_dict
@@ -362,6 +365,10 @@ class CongestionEngine:
     # Query methods
     # ------------------------------------------------------------------
 
+    def get_vessels_snapshot(self, locode: str) -> dict:
+        """Return a snapshot copy of vessels for a port (thread-safe)."""
+        return dict(self._port_vessels.get(locode, {}))
+
     def get_port_data(self, locode: str) -> Optional[dict]:
         """Return raw vessel data for a port.
 
@@ -383,7 +390,7 @@ class CongestionEngine:
 
         Severity thresholds: SEVERE >= 75, HIGH >= 50, MODERATE >= 25, LOW < 25
         """
-        vessels = self._port_vessels.get(locode, {})
+        vessels = dict(self._port_vessels.get(locode, {}))
 
         anchored_count = 0
         berthed_count = 0
