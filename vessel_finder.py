@@ -23,8 +23,8 @@ def _set_cached(mmsi: int, data: dict):
     data["_cached_at"] = time.time()
     _vessel_cache[mmsi] = data
     # Trim cache if too large
-    if len(_vessel_cache) > 5000:
-        oldest = sorted(_vessel_cache.items(), key=lambda x: x[1].get("_cached_at", 0))[:1000]
+    if len(_vessel_cache) > 2000:
+        oldest = sorted(_vessel_cache.items(), key=lambda x: x[1].get("_cached_at", 0))[:500]
         for k, _ in oldest:
             del _vessel_cache[k]
 

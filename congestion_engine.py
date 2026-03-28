@@ -393,10 +393,10 @@ class CongestionEngine:
         now = time.time()
 
         for v in vessels.values():
-            st = v["state"]
+            st = v.get("state", "")
             if st == "ANCHORED":
                 anchored_count += 1
-                total_wait_hours += (now - v["state_since"]) / 3600.0
+                total_wait_hours += (now - v.get("state_since", now)) / 3600.0
             elif st == "BERTHED":
                 berthed_count += 1
             elif st == "APPROACHING":
@@ -561,12 +561,12 @@ class CongestionEngine:
             type_stats.append({
                 "vessel_type": vtype,
                 "count": n,
-                "avg_total_hours": round(sum(total_hrs) / n, 1),
-                "avg_anchor_hours": round(sum(anchor_hrs) / n, 1),
-                "avg_berth_hours": round(sum(berth_hrs) / n, 1),
-                "max_total_hours": round(max(total_hrs), 1),
-                "max_anchor_hours": round(max(anchor_hrs), 1),
-                "min_total_hours": round(min(total_hrs), 1),
+                "avg_total_hours": round(sum(total_hrs) / n, 1) if n else 0,
+                "avg_anchor_hours": round(sum(anchor_hrs) / n, 1) if n else 0,
+                "avg_berth_hours": round(sum(berth_hrs) / n, 1) if n else 0,
+                "max_total_hours": round(max(total_hrs), 1) if total_hrs else 0,
+                "max_anchor_hours": round(max(anchor_hrs), 1) if anchor_hrs else 0,
+                "min_total_hours": round(min(total_hrs), 1) if total_hrs else 0,
             })
 
         # Overall stats
@@ -576,9 +576,9 @@ class CongestionEngine:
             all_berth = [v["berth_hours"] for v in all_visits]
             overall = {
                 "total_visits": len(all_visits),
-                "avg_turnaround_hours": round(sum(all_total) / len(all_total), 1),
-                "avg_wait_hours": round(sum(all_anchor) / len(all_anchor), 1),
-                "avg_berth_hours": round(sum(all_berth) / len(all_berth), 1),
+                "avg_turnaround_hours": round(sum(all_total) / len(all_total), 1) if all_total else 0,
+                "avg_wait_hours": round(sum(all_anchor) / len(all_anchor), 1) if all_anchor else 0,
+                "avg_berth_hours": round(sum(all_berth) / len(all_berth), 1) if all_berth else 0,
             }
         else:
             overall = {

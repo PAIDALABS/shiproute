@@ -619,9 +619,11 @@ async def get_live_turnaround(locode: str):
     if not port_detail:
         raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
 
-    port_def = None
     from congestion_engine import MONITORED_PORTS
     port_def = MONITORED_PORTS.get(locode_upper)
+
+    if not port_def:
+        raise HTTPException(status_code=404, detail=f"Port {locode} not in monitored ports")
 
     vessels = port_detail.get("vessels", [])
     if not vessels or not DATALASTIC_API_KEY:
@@ -704,6 +706,8 @@ async def get_live_turnaround(locode: str):
                 if arrival_epoch is None:
                     continue
 
+                if not positions:
+                    continue
                 last_epoch = positions[0]["last_position_epoch"]
                 total_hours = (last_epoch - arrival_epoch) / 3600.0
 

@@ -28,7 +28,8 @@ def _sample_points_along_route(route_geojson: dict, num_points: int = 20) -> lis
     """Sample evenly-spaced points along a GeoJSON route."""
     coords = route_geojson.get("geometry", {}).get("coordinates", [])
     if not coords:
-        feat = route_geojson.get("features", [{}])[0] if "features" in route_geojson else route_geojson
+        features = route_geojson.get("features", [])
+        feat = features[0] if features else route_geojson
         coords = feat.get("geometry", {}).get("coordinates", [])
 
     if len(coords) < 2:
