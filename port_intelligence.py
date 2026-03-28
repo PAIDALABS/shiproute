@@ -19,6 +19,7 @@ Metrics from vessel_history API (slowest):
 """
 
 import asyncio
+import logging
 import math
 import time
 from collections import Counter
@@ -143,6 +144,7 @@ async def enrich_with_specs(vessels: list[dict], api_key: str, max_vessels: int 
                 specs.append({**info, "_state": v.get("state")})
                 await asyncio.sleep(0.15)
             except Exception:
+                logging.debug("Failed to fetch vessel info for MMSI %s", mmsi, exc_info=True)
                 continue
 
     if not specs:
@@ -307,6 +309,7 @@ async def trace_origins(vessels: list[dict], api_key: str, port_def: dict, max_v
                     })
                 await asyncio.sleep(0.2)
             except Exception:
+                logging.debug("Failed to fetch vessel history for MMSI %s", mmsi, exc_info=True)
                 continue
 
     return origins

@@ -341,7 +341,7 @@ async def get_arrival_advisory(locode: str):
     # Compute avg wait from anchored vessels
     import time as _t
     _now = _t.time()
-    _vessels = engine._port_vessels.get(locode_upper, {})
+    _vessels = engine.get_vessels_snapshot(locode_upper)
     _waits = [(_now - v["state_since"]) / 3600.0 for v in _vessels.values() if v["state"] == "ANCHORED"]
     avg_wait = round(sum(_waits) / len(_waits), 1) if _waits else 0
 

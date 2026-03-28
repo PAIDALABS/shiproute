@@ -5,6 +5,7 @@ and weekly patterns using Datalastic vessel data.
 
 import asyncio
 import json
+import logging
 import os
 import time
 from collections import defaultdict
@@ -30,7 +31,7 @@ def save_daily_snapshot(engine: CongestionEngine):
     snapshot = {}
     for locode, port_def in MONITORED_PORTS.items():
         metrics = engine.get_port_metrics(locode)
-        vessels = engine._port_vessels.get(locode, {})
+        vessels = engine.get_vessels_snapshot(locode)
 
         # Compute cargo estimate from in-memory data
         total_dwt = 0
@@ -89,7 +90,7 @@ async def compute_cargo_flow(
     if not port_def:
         return {}
 
-    vessels = list(engine._port_vessels.get(locode, {}).values())
+    vessels = list(engine.get_vessels_snapshot(locode).values())
     now = time.time()
 
     # ── Current cargo at port ────────────────────────────────
@@ -134,6 +135,7 @@ async def compute_cargo_flow(
                             }
                     await asyncio.sleep(0.15)
                 except Exception:
+                    logging.debug("Failed to fetch vessel info for MMSI %s", mmsi, exc_info=True)
                     continue
 
     def _sum_cargo(vessel_list):
@@ -227,6 +229,7 @@ async def compute_cargo_flow(
 
                     await asyncio.sleep(0.15)
                 except Exception:
+                    logging.debug("Failed to fetch vessel history for MMSI %s", mmsi, exc_info=True)
                     continue
 
     weekly_pattern = [
@@ -253,13 +256,6 @@ async def compute_cargo_flow(
                 "cargo_vessels": port_snap.get("cargo_vessels", 0),
                 "congestion_score": port_snap.get("congestion_score", 0),
             })
-
-    # Compute monthly summary from weekly data
-    monthly = defaultdict(lambda: {"arrivals": 0, "est_tonnes": 0})
-    for w in weekly_pattern:
-        month_key = w["week"][:7]  # YYYY-W -> YYYY-M approx
-        monthly[month_key]["arrivals"] += w["arrivals"]
-        monthly[month_key]["est_tonnes"] += w["est_tonnes"]
 
     return {
         "locode": locode,

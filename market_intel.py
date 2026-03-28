@@ -10,7 +10,7 @@ def get_market_overview(engine: CongestionEngine) -> dict:
     ports = []
     for locode, port_def in MONITORED_PORTS.items():
         metrics = engine.get_port_metrics(locode)
-        vessels = engine._port_vessels.get(locode, {})
+        vessels = engine.get_vessels_snapshot(locode)
 
         # Count by type
         type_counts = defaultdict(int)
@@ -76,7 +76,7 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
     corridor_vessels = []
 
     for locode in india_ports + africa_ports:
-        vessels = engine._port_vessels.get(locode, {})
+        vessels = engine.get_vessels_snapshot(locode)
         port_def = MONITORED_PORTS.get(locode, {})
 
         for v in vessels.values():

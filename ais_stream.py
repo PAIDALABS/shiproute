@@ -122,6 +122,7 @@ async def run_ais_stream(engine: CongestionEngine) -> None:
     Despite the function name (kept for compatibility), this now uses
     Datalastic REST polling instead of AIS Stream WebSocket.
     """
+    backoff_seconds = 30
     while True:
         if not DATALASTIC_API_KEY:
             logger.warning(
@@ -163,6 +164,8 @@ async def run_ais_stream(engine: CongestionEngine) -> None:
                     if pruned:
                         logger.info("Pruned %d stale vessels.", pruned)
 
+                    backoff_seconds = 30  # reset on success
+
                     # Wait for next poll cycle
                     await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
@@ -172,9 +175,9 @@ async def run_ais_stream(engine: CongestionEngine) -> None:
             engine.connected_since = None
             raise
 
-        except Exception:
-            logger.exception("Unexpected error in Datalastic polling loop.")
+        except Exception as e:
             engine.stream_connected = False
             engine.connected_since = None
-            logger.info("Retrying in 30s...")
-            await asyncio.sleep(30)
+            logging.warning("AIS stream error: %s — retrying in %ds", e, backoff_seconds)
+            await asyncio.sleep(backoff_seconds)
+            backoff_seconds = min(backoff_seconds * 2, 300)
