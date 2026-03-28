@@ -18,6 +18,8 @@ from ais_stream import run_ais_stream
 from cargo_flow import compute_cargo_flow, compute_all_ports_flow, save_daily_snapshot
 from voyage_planner import calculate_multi_leg, estimate_fuel_cost
 from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track
+from weather import get_route_weather, get_port_weather
+from market_intel import get_market_overview, get_africa_corridor
 
 # ── Database connection ───────────────────────────────────────────────────────
 
@@ -248,6 +250,99 @@ async def api_vessel_track(mmsi: int, days: int = Query(default=30, le=30)):
     if not track:
         raise HTTPException(404, "No track data")
     return track
+
+
+# ── Weather & Risk ────────────────────────────────────────────────────────
+
+@app.post("/api/weather/route")
+async def api_route_weather(body: dict):
+    """Get marine weather along a calculated route."""
+    route = body.get("route_geojson")
+    speed = body.get("speed_knots", 14.0)
+    departure = body.get("departure_time")
+    if not route:
+        raise HTTPException(422, "route_geojson required")
+    result = await get_route_weather(route, speed, departure)
+    if "error" in result:
+        raise HTTPException(500, result["error"])
+    return result
+
+
+@app.get("/api/weather/port/{locode}")
+async def api_port_weather(locode: str):
+    """Get weather at a port (current + 7-day forecast)."""
+    p = ports.get(locode.upper())
+    if not p:
+        raise HTTPException(404, f"Port not found: {locode}")
+    wx = await get_port_weather(p["lat"], p["lon"])
+    return {"port": {"name": p["name"], "locode": locode.upper(), "lat": p["lat"], "lon": p["lon"]}, **wx}
+
+
+# ── Market Intel ─────────────────────────────────────────────────────────────
+
+@app.get("/api/market/overview")
+def api_market_overview():
+    """Cross-port market overview."""
+    return get_market_overview(engine)
+
+@app.get("/api/market/africa-corridor")
+def api_africa_corridor():
+    """India ↔ East Africa trade corridor analysis."""
+    return get_africa_corridor(engine)
+
+
+# ── Arrival Advisory ──────────────────────────────────────────────────────────
+
+@app.get("/api/port-watch/{locode}/arrival-advisory")
+async def get_arrival_advisory(locode: str):
+    """Estimate wait time at port based on current congestion."""
+    locode_upper = locode.upper()
+    metrics = engine.get_port_metrics(locode_upper)
+    if metrics["total_vessels"] == 0:
+        return {"locode": locode_upper, "monitored": False, "message": "Port not actively monitored"}
+
+    from congestion_engine import MONITORED_PORTS
+    port_def = MONITORED_PORTS.get(locode_upper)
+    if not port_def:
+        return {"locode": locode_upper, "monitored": False, "message": "Port not in monitoring list"}
+
+    # Estimate wait based on current queue and berth ratio
+    anchored = metrics["anchored_count"]
+    berthed = metrics["berthed_count"]
+    avg_wait = metrics["avg_wait_hours"]
+
+    # If no wait data yet, estimate from queue ratio
+    if avg_wait == 0 and anchored > 0 and berthed > 0:
+        # Rough estimate: each vessel at anchor waits ~(anchored/berthed * 12) hours
+        estimated_wait = round((anchored / berthed) * 12, 1)
+    elif avg_wait > 0:
+        estimated_wait = avg_wait
+    else:
+        estimated_wait = 0
+
+    severity = metrics["severity"]
+
+    if severity == "SEVERE":
+        recommendation = "Expect significant delays. Consider alternative ports."
+    elif severity == "HIGH":
+        recommendation = "Port is busy. Plan for waiting at anchorage."
+    elif severity == "MODERATE":
+        recommendation = "Moderate traffic. Normal wait times expected."
+    else:
+        recommendation = "Port is clear. Minimal waiting expected."
+
+    return {
+        "locode": locode_upper,
+        "name": port_def["name"],
+        "monitored": True,
+        "congestion_score": metrics["congestion_score"],
+        "severity": severity,
+        "current_queue": anchored,
+        "berths_occupied": berthed,
+        "estimated_wait_hours": estimated_wait,
+        "estimated_wait_days": round(estimated_wait / 24, 1),
+        "recommendation": recommendation,
+    }
 
 
 # ── Live Port Congestion ──────────────────────────────────────────────────────

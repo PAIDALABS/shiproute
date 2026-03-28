@@ -102,6 +102,7 @@
         <div id="voyage-summary"></div>
         <div id="voyage-legs"></div>
         <div id="voyage-fuel"></div>
+        <div id="voyage-congestion"></div>
       </div>
 
       <div id="loading" class="hidden"><div class="spinner"></div>Calculating...</div>
@@ -158,16 +159,35 @@
       <div id="finder-results"></div>
     </div><!-- /#finder-mode -->
 
-    <!-- ── Weather Mode (stub) ────────────────────────────────────────── -->
+    <!-- ── Weather Mode ────────────────────────────────────────────────── -->
     <div id="weather-mode" class="hidden">
-      <div><div class="brand-title">Weather & Risk</div><div class="brand-sub">Marine weather forecasts</div></div>
-      <div class="vessel-empty">Coming soon — marine weather along routes and at ports.</div>
+      <div><div class="brand-title">Weather & Risk</div><div class="brand-sub">Marine forecasts & route safety</div></div>
+
+      <div class="waypoint-block">
+        <div class="waypoint-label"><span class="dot dot-origin"></span> Port Weather</div>
+        <div class="autocomplete-wrap">
+          <input class="inp" type="text" id="weather-port-search" placeholder="Search port..." autocomplete="off" />
+          <div class="dropdown" id="weather-port-dropdown"></div>
+        </div>
+      </div>
+      <button id="weather-port-btn" class="btn-secondary">Get Port Weather</button>
+
+      <div id="weather-port-result"></div>
+
+      <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
+        <div class="waypoint-label">Route Weather</div>
+        <div style="font-size:11px;color:var(--text2)">Calculate a voyage first, then click below to check weather along it.</div>
+        <button id="weather-route-btn" class="btn-secondary" style="margin-top:6px">Check Route Weather</button>
+      </div>
+
+      <div id="weather-route-result"></div>
     </div><!-- /#weather-mode -->
 
-    <!-- ── Market Intel Mode (stub) ───────────────────────────────────── -->
+    <!-- ── Market Intel Mode ────────────────────────────────────────── -->
     <div id="market-mode" class="hidden">
-      <div><div class="brand-title">Market Intel</div><div class="brand-sub">Cargo trends & seasonality</div></div>
-      <div class="vessel-empty">Coming soon — cargo volume trends and Africa corridor analysis.</div>
+      <div><div class="brand-title">Market Intel</div><div class="brand-sub">Cargo trends & Africa corridor</div></div>
+      <div id="market-loading" class="vessel-empty">Loading market data...</div>
+      <div id="market-content"></div>
     </div><!-- /#market-mode -->
 
   </aside>

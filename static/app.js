@@ -444,6 +444,32 @@ function renderVoyageResults(data) {
       </div>
       <div class="voyage-fuel-detail">${fuelConsumption} MT/day &times; ${totalDays.toFixed(1)} days &times; $${fuelPrice}/MT</div>
     </div>`;
+
+  // Check congestion at final destination
+  const lastLeg = data.legs[data.legs.length - 1];
+  const destPort = waypoints[waypoints.length - 1];
+  const destLocode = destPort?.point?.locode;
+  const congestionEl = $('voyage-congestion');
+  if (congestionEl) congestionEl.innerHTML = '';
+  if (destLocode) {
+    fetch(`/api/port-watch/${destLocode}/arrival-advisory`)
+      .then(r => r.ok ? r.json() : null)
+      .then(advisory => {
+        if (advisory && advisory.monitored) {
+          const el = $('voyage-congestion');
+          if (!el) return;
+          const riskCol = advisory.severity === 'SEVERE' ? '#ef5350' : advisory.severity === 'HIGH' ? '#ff9800' : advisory.severity === 'MODERATE' ? '#ffeb3b' : '#4caf50';
+          el.innerHTML = `
+            <div style="margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;border-left:3px solid ${riskCol}">
+              <div style="font-size:11px;font-weight:600;color:${riskCol};text-transform:uppercase;margin-bottom:4px">Port Congestion at ${advisory.name}</div>
+              <div style="font-size:13px;font-weight:700;color:var(--text)">Expected wait: ${advisory.estimated_wait_hours > 0 ? advisory.estimated_wait_days + ' days' : 'Minimal'}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">${advisory.recommendation}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px">Queue: ${advisory.current_queue} vessels · Score: ${advisory.congestion_score}</div>
+            </div>`;
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 // ── Cursor lat/lon readout ─────────────────────────────────────────────────
@@ -558,6 +584,7 @@ function switchMode(mode) {
   } else if (mode === 'market') {
     marketEl.classList.remove('hidden');
     btnMarket.classList.add('active');
+    loadMarketData();
   }
 }
 
@@ -1513,4 +1540,297 @@ async function loadVesselDetail(mmsi) {
     $('pd-port-name').textContent = 'Error loading vessel';
     $('pd-port-meta').textContent = err.message;
   }
+}
+
+// ── Weather & Risk Mode ──────────────────────────────────────────────────────
+let weatherPortMarkers = L.featureGroup();
+let weatherRouteMarkers = L.featureGroup();
+let selectedWeatherPort = null;
+
+// Port weather search autocomplete
+(function initWeatherAutocomplete() {
+  const inp = document.getElementById('weather-port-search');
+  const dd = document.getElementById('weather-port-dropdown');
+  if (!inp || !dd) return;
+
+  let debounce = null;
+  inp.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(async () => {
+      const q = inp.value.trim();
+      if (q.length < 2) { dd.innerHTML = ''; dd.classList.remove('open'); return; }
+      try {
+        const res = await fetch(`/api/ports/search?q=${encodeURIComponent(q)}&limit=8`);
+        const ports = await res.json();
+        if (!ports.length) { dd.innerHTML = ''; dd.classList.remove('open'); return; }
+        dd.innerHTML = ports.map(p =>
+          `<div class="dd-item" data-locode="${p.locode}" data-name="${p.name}">${p.name} <span style="color:var(--text2)">${p.locode}</span></div>`
+        ).join('');
+        dd.classList.add('open');
+        dd.querySelectorAll('.dd-item').forEach(item => {
+          item.addEventListener('click', () => {
+            selectedWeatherPort = { locode: item.dataset.locode, name: item.dataset.name };
+            inp.value = item.dataset.name;
+            dd.classList.remove('open');
+          });
+        });
+      } catch (e) { dd.innerHTML = ''; dd.classList.remove('open'); }
+    }, 250);
+  });
+})();
+
+document.getElementById('weather-port-btn')?.addEventListener('click', async () => {
+  if (!selectedWeatherPort) return;
+  const el = document.getElementById('weather-port-result');
+  el.innerHTML = '<div class="vessel-empty">Loading weather...</div>';
+
+  try {
+    const res = await fetch(`/api/weather/port/${selectedWeatherPort.locode}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderPortWeather(data);
+  } catch (err) {
+    el.innerHTML = `<div class="vessel-empty">Error: ${err.message}</div>`;
+  }
+});
+
+function renderPortWeather(data) {
+  const el = document.getElementById('weather-port-result');
+  const c = data.current || {};
+  const forecast = data.forecast || [];
+
+  const windDir = (deg) => {
+    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round((deg % 360) / 22.5) % 16];
+  };
+
+  let html = `
+    <div class="intel-section" style="margin-top:10px">
+      <div class="intel-section-title">Current Conditions — ${escHtml(data.port?.name || '')}</div>
+      <div class="intel-grid">
+        <div class="intel-card"><div class="intel-val" style="color:${c.risk_color || 'var(--text)'}">${c.wave_height_m?.toFixed(1) || 0}m</div><div class="intel-label">Waves</div></div>
+        <div class="intel-card"><div class="intel-val">${Math.round(c.wind_speed_kts || 0)} kts</div><div class="intel-label">Wind ${windDir(c.wind_direction || 0)}</div></div>
+        <div class="intel-card"><div class="intel-val">${c.temperature_c?.toFixed(0) || '?'}°C</div><div class="intel-label">Temp</div></div>
+      </div>
+      <div style="text-align:center;margin:6px 0;font-size:12px;font-weight:600;color:${c.risk_color || 'var(--text)'}">${c.risk_level || 'N/A'} Risk</div>
+    </div>`;
+
+  if (forecast.length > 0) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title">7-Day Forecast</div>
+      <table class="turnaround-table">
+        <thead><tr><th>Date</th><th style="text-align:right">Wind</th><th style="text-align:right">Waves</th><th style="text-align:right">Rain</th></tr></thead>
+        <tbody>`;
+    forecast.forEach(f => {
+      const wMax = f.wind_max_kts || 0;
+      const waveMax = f.wave_max_m || 0;
+      const risk = waveMax > 4 || wMax > 35 ? 'color:#ef5350' : waveMax > 2.5 || wMax > 25 ? 'color:#ff9800' : '';
+      html += `<tr>
+        <td>${(f.date || '').substring(5)}</td>
+        <td class="tt-num" style="${risk}">${Math.round(wMax)} kts</td>
+        <td class="tt-num" style="${risk}">${waveMax?.toFixed(1) || '?'}m</td>
+        <td class="tt-num">${(f.precipitation_mm || 0).toFixed(0)}mm</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// Route weather
+document.getElementById('weather-route-btn')?.addEventListener('click', async () => {
+  if (!routeLayer) {
+    document.getElementById('weather-route-result').innerHTML = '<div class="vessel-empty">Calculate a voyage first in the Voyage tab.</div>';
+    return;
+  }
+
+  const el = document.getElementById('weather-route-result');
+  el.innerHTML = '<div class="vessel-empty">Checking weather along route...</div>';
+
+  // Get the route GeoJSON from the last calculated route
+  const routeGeoJSON = routeLayer.toGeoJSON();
+  const speed = parseFloat(document.getElementById('speed-input')?.value) || 14;
+
+  try {
+    const res = await fetch('/api/weather/route', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ route_geojson: routeGeoJSON, speed_knots: speed }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderRouteWeather(data);
+  } catch (err) {
+    el.innerHTML = `<div class="vessel-empty">Error: ${err.message}</div>`;
+  }
+});
+
+function renderRouteWeather(data) {
+  const el = document.getElementById('weather-route-result');
+  const points = data.weather_points || [];
+
+  // Add weather dots on map
+  weatherRouteMarkers.clearLayers();
+  weatherRouteMarkers.addTo(map);
+
+  points.forEach(p => {
+    if (!p.lat || !p.lon) return;
+    const marker = L.circleMarker([p.lat, p.lon], {
+      radius: 6,
+      color: '#fff',
+      weight: 1.5,
+      fillColor: p.risk_color || '#8b949e',
+      fillOpacity: 0.85,
+    });
+    const wx = p.weather || {};
+    marker.bindTooltip(`
+      <strong>${p.distance_nmi} nmi</strong> — ${p.risk_level}<br>
+      Waves: ${wx.wave_height_m?.toFixed(1) || '?'}m<br>
+      Swell: ${wx.swell_height_m?.toFixed(1) || '?'}m
+    `, { sticky: true });
+    weatherRouteMarkers.addLayer(marker);
+  });
+
+  // Summary
+  let html = `
+    <div class="intel-section" style="margin-top:10px">
+      <div class="intel-section-title">Route Weather — ${points.length} points</div>
+      <div style="text-align:center;padding:8px;background:var(--bg3);border-radius:6px;margin-bottom:8px">
+        <div style="font-size:16px;font-weight:700;color:${data.overall_risk_color}">${data.overall_risk} RISK</div>
+      </div>`;
+
+  if (data.worst_point?.weather) {
+    const wp = data.worst_point;
+    const wx = wp.weather;
+    html += `<div style="font-size:11px;color:var(--text2)">
+      Worst: ${wx.wave_height_m?.toFixed(1)}m waves at ${wp.distance_nmi} nmi from origin
+    </div>`;
+  }
+
+  // Risk breakdown
+  const counts = {LOW: 0, MODERATE: 0, HIGH: 0, SEVERE: 0};
+  points.forEach(p => { if (counts[p.risk_level] !== undefined) counts[p.risk_level]++; });
+  html += `<div class="intel-grid" style="margin-top:6px">
+    <div class="intel-card"><div class="intel-val good">${counts.LOW}</div><div class="intel-label">Low</div></div>
+    <div class="intel-card"><div class="intel-val warn">${counts.MODERATE}</div><div class="intel-label">Moderate</div></div>
+    <div class="intel-card"><div class="intel-val hot">${counts.HIGH + counts.SEVERE}</div><div class="intel-label">High/Severe</div></div>
+  </div>`;
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+
+// ── Market Intel Mode ────────────────────────────────────────────────────────
+async function loadMarketData() {
+  const loading = document.getElementById('market-loading');
+  const content = document.getElementById('market-content');
+  loading.classList.remove('hidden');
+  loading.textContent = 'Loading market intelligence...';
+  content.innerHTML = '';
+
+  try {
+    const [overviewRes, corridorRes] = await Promise.all([
+      fetch('/api/market/overview'),
+      fetch('/api/market/africa-corridor'),
+    ]);
+
+    const overview = overviewRes.ok ? await overviewRes.json() : null;
+    const corridor = corridorRes.ok ? await corridorRes.json() : null;
+
+    loading.classList.add('hidden');
+    renderMarketIntel(overview, corridor);
+  } catch (err) {
+    loading.textContent = `Error: ${err.message}`;
+  }
+}
+
+function renderMarketIntel(overview, corridor) {
+  const content = document.getElementById('market-content');
+  let html = '';
+
+  if (overview) {
+    const s = overview.summary;
+
+    // Summary cards
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Market Overview</div>
+      <div class="intel-grid">
+        <div class="intel-card"><div class="intel-val">${s.total_vessels_all_ports}</div><div class="intel-label">Total Vessels</div></div>
+        <div class="intel-card"><div class="intel-val warn">${s.total_africa_trade}</div><div class="intel-label">Africa Trade</div></div>
+        <div class="intel-card"><div class="intel-val">${s.ports_monitored}</div><div class="intel-label">Ports</div></div>
+      </div>
+    </div>`;
+
+    // Port comparison heatmap
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Port Activity Comparison</div>`;
+
+    const maxV = Math.max(...overview.ports.map(p => p.total_vessels), 1);
+    overview.ports.forEach(p => {
+      const pct = Math.round((p.total_vessels / maxV) * 100);
+      const severityCol = {'SEVERE': '#ef5350', 'HIGH': '#ff9800', 'MODERATE': '#ffeb3b', 'LOW': '#4caf50'}[p.severity] || '#4caf50';
+      html += `<div class="intel-bar-row">
+        <span class="intel-bar-label" title="${p.name}">${p.name.substring(0, 10)}</span>
+        <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${pct}%;background:${severityCol}"></div></div>
+        <span class="intel-bar-val">${p.total_vessels} (${p.congestion_score})</span>
+      </div>`;
+    });
+    html += '</div>';
+
+    // Vessel type distribution across all ports
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Fleet Mix (All Ports)</div>`;
+    const allTypes = {};
+    overview.ports.forEach(p => {
+      Object.entries(p.vessel_types || {}).forEach(([t, c]) => {
+        allTypes[t] = (allTypes[t] || 0) + c;
+      });
+    });
+    const sortedTypes = Object.entries(allTypes).sort((a, b) => b[1] - a[1]);
+    const maxType = sortedTypes[0]?.[1] || 1;
+    sortedTypes.slice(0, 8).forEach(([t, c]) => {
+      const pct = Math.round((c / maxType) * 100);
+      html += `<div class="intel-bar-row">
+        <span class="intel-bar-label">${t}</span>
+        <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${pct}%;background:#9c27b0"></div></div>
+        <span class="intel-bar-val">${c}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // Africa corridor
+  if (corridor && corridor.total_vessels > 0) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title" style="color:#ff9800">India ↔ Africa Corridor</div>
+      <div class="intel-grid">
+        <div class="intel-card full"><div class="intel-val warn">${corridor.total_vessels} vessels</div><div class="intel-label">Bagged Cargo on Corridor</div></div>
+      </div>`;
+
+    // By port
+    Object.entries(corridor.by_port || {}).forEach(([locode, count]) => {
+      if (count > 0) {
+        html += `<div style="font-size:11px;color:var(--text2);margin:2px 0">${locode}: ${count} vessels</div>`;
+      }
+    });
+
+    // Vessel list
+    html += '<div style="margin-top:6px">';
+    corridor.vessels.slice(0, 15).forEach(v => {
+      html += `<div class="intel-lead">
+        <div class="intel-lead-name">${v.name || v.mmsi}</div>
+        <div class="intel-lead-detail">${v.type} · ${v.state} at ${v.port}${v.destination ? ' → ' + v.destination : ''}</div>
+      </div>`;
+    });
+    html += '</div></div>';
+  } else if (corridor) {
+    html += `<div class="intel-section">
+      <div class="intel-section-title" style="color:#ff9800">India ↔ Africa Corridor</div>
+      <div class="vessel-empty">No bagged cargo vessels detected on corridor currently.</div>
+    </div>`;
+  }
+
+  content.innerHTML = html;
 }
