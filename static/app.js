@@ -514,7 +514,7 @@ function showLoading(on)   { ui.loading.classList.toggle('hidden', !on); ui.calc
 
 
 // ── App Mode ──────────────────────────────────────────────────────────────
-let appMode           = 'voyage';
+let appMode           = 'portwatch';
 let congestionData    = null;
 let portMarkers       = L.featureGroup().addTo(map);
 let selectedPortLocode = null;
@@ -1245,7 +1245,7 @@ function renderIntelligence(data) {
       <div class="intel-section-title">ETA Accuracy</div>
       <div class="intel-grid">
         <div class="intel-card"><div class="intel-val">${eta.vessels_with_eta}</div><div class="intel-label">With ETA</div></div>
-        <div class="intel-card"><div class="intel-val good">${eta.already_arrived}</div><div class="intel-label">Arrived</div></div>
+        <div class="intel-card"><div class="intel-val good">${eta.overdue}</div><div class="intel-label">Overdue</div></div>
         <div class="intel-card"><div class="intel-val">${eta.still_expected}</div><div class="intel-label">Expected</div></div>
       </div>
       ${eta.avg_overdue_hours > 0 ? `<div style="font-size:11px;color:var(--text2);text-align:center">Avg ${fmtH(eta.avg_overdue_hours)} past ETA \u00b7 Max ${fmtH(eta.max_overdue_hours)}</div>` : ''}
@@ -1837,3 +1837,6 @@ function renderMarketIntel(overview, corridor) {
 
   content.innerHTML = html;
 }
+
+// ── Boot into Port Watch mode ────────────────────────────────────────────
+switchMode('portwatch');

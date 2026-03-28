@@ -85,7 +85,7 @@ def compute_instant_intelligence(vessels: list[dict], port_def: dict) -> dict:
 
     eta_analysis = {
         "vessels_with_eta": with_eta,
-        "already_arrived": past_eta,
+        "overdue": past_eta,
         "still_expected": future_eta,
         "avg_overdue_hours": round(sum(overdue_hours) / len(overdue_hours), 1) if overdue_hours else 0,
         "max_overdue_hours": round(max(overdue_hours), 1) if overdue_hours else 0,
@@ -175,14 +175,16 @@ async def enrich_with_specs(vessels: list[dict], api_key: str, max_vessels: int 
     # ── Vessel size classes ──────────────────────────────────
     def _classify_size(dwt, length):
         if dwt and dwt > 200000:
-            return "VLCC / Capesize"
-        if dwt and dwt > 80000:
+            return "VLCC / VLOC"
+        if dwt and dwt > 100000:
+            return "Capesize"
+        if dwt and dwt > 65000:
             return "Panamax"
         if dwt and dwt > 50000:
             return "Supramax"
-        if dwt and dwt > 25000:
+        if dwt and dwt > 40000:
             return "Handymax"
-        if dwt and dwt > 10000:
+        if dwt and dwt > 15000:
             return "Handysize"
         if length and length > 100:
             return "Coaster (large)"

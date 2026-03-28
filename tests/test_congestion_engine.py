@@ -10,6 +10,7 @@ def test_monitored_ports_have_required_fields():
         assert "lat" in port
         assert "lon" in port
         assert "bbox" in port
+        assert "max_queue" in port
         bbox = port["bbox"]
         assert len(bbox) == 2
         assert len(bbox[0]) == 2
@@ -19,15 +20,23 @@ def test_monitored_ports_have_required_fields():
 
 
 def test_monitored_ports_count():
-    assert len(MONITORED_PORTS) == 8
+    assert len(MONITORED_PORTS) == 12
+    # India
     assert "INKAN" in MONITORED_PORTS
     assert "INKAK" in MONITORED_PORTS
     assert "INVTZ" in MONITORED_PORTS
+    assert "INNSA" in MONITORED_PORTS
+    assert "INMUN" in MONITORED_PORTS
+    # Europe
     assert "NLRTM" in MONITORED_PORTS
     assert "BEANR" in MONITORED_PORTS
     assert "DEHAM" in MONITORED_PORTS
+    # Madagascar
     assert "MGTNR" in MONITORED_PORTS
     assert "MGTLE" in MONITORED_PORTS
+    # East Africa
+    assert "KEMBA" in MONITORED_PORTS
+    assert "TZDAR" in MONITORED_PORTS
 
 
 def test_classify_anchored_vessel():

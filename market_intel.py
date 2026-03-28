@@ -19,7 +19,7 @@ def get_market_overview(engine: CongestionEngine) -> dict:
             t = v.get("ship_type") or "Unknown"
             type_counts[t] += 1
             dest = (v.get("destination") or "").upper()
-            if any(kw in dest for kw in ["MOMBASA", "DAR", "MAPUTO", "DJIBOUTI", "LAGOS", "TEMA", "DURBAN", "BEIRA", "NACALA", "TOAMASINA", "AFRICA"]):
+            if any(kw in dest for kw in ["MOMBASA", "DAR ES SALAAM", "MAPUTO", "DJIBOUTI", "LAGOS", "TEMA", "DURBAN", "BEIRA", "NACALA", "TOAMASINA", "AFRICA"]):
                 africa_count += 1
 
         ports.append({
@@ -58,13 +58,18 @@ def get_market_overview(engine: CongestionEngine) -> dict:
 
 def get_africa_corridor(engine: CongestionEngine) -> dict:
     """Analyze India ↔ East Africa trade corridor."""
-    india_ports = ["INKAN", "INKAK", "INVTZ"]
-    africa_ports = ["MGTNR", "MGTLE"]
+    india_ports = ["INKAN", "INKAK", "INVTZ", "INNSA", "INMUN"]
+    africa_ports = ["MGTNR", "MGTLE", "KEMBA", "TZDAR"]
 
     africa_keywords = [
-        "MOMBASA", "DAR", "MAPUTO", "DJIBOUTI", "MOGADISHU", "LAGOS",
+        "MOMBASA", "DAR ES SALAAM", "MAPUTO", "DJIBOUTI", "MOGADISHU", "LAGOS",
         "TEMA", "DURBAN", "BEIRA", "NACALA", "TOAMASINA", "ZANZIBAR",
         "AFRICA", "LAMU", "BERBERA", "TANGA",
+    ]
+    india_keywords = [
+        "KANDLA", "KAKINADA", "VIZAG", "VISHAKHAPATNAM", "INDIA",
+        "MUMBAI", "MUNDRA", "NHAVA", "JNPT", "CHENNAI", "HALDIA",
+        "PARADIP", "TUTICORIN", "KOLKATA", "KOCHI",
     ]
     bagged_types = ["Cargo", "General Cargo", "Multi Purpose", "Bulk Carrier"]
 
@@ -81,7 +86,12 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
             is_bagged_type = any(bt.lower() in vtype.lower() for bt in bagged_types)
             is_africa_dest = any(kw in dest for kw in africa_keywords)
 
-            if is_bagged_type and (is_africa_dest or locode in africa_ports):
+            is_india_dest = any(kw in dest for kw in india_keywords)
+            if is_bagged_type and (
+                (locode in india_ports and is_africa_dest)
+                or (locode in africa_ports and is_india_dest)
+                or (locode in africa_ports and locode in india_ports)  # shouldn't happen but safe
+            ):
                 corridor_vessels.append({
                     "mmsi": v["mmsi"],
                     "name": v.get("name"),

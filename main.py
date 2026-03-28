@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 import searoute as sr
 import psycopg2
@@ -200,7 +200,7 @@ async def get_port_cargo_flow(locode: str):
 
 class MultiRouteRequest(BaseModel):
     waypoints: List[dict]  # [{lat, lon, name?}, ...]
-    speed_knots: float = 14.0
+    speed_knots: float = Field(default=14.0, gt=0, le=35)
 
 @app.post("/api/route/multi")
 def calculate_multi_route(req: MultiRouteRequest):

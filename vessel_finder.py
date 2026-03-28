@@ -57,7 +57,7 @@ def score_availability(vessel: dict) -> dict:
 
     # No destination or destination = current area
     if not dest or dest.upper() in ("", "CLASS B"):
-        score += 0.25
+        score += 0.10
         reasons.append("No destination set")
 
     # Check if vessel type suggests commercial availability
@@ -67,7 +67,7 @@ def score_availability(vessel: dict) -> dict:
         reasons.append("Commercial vessel type")
 
     # At anchor (not berthed = not actively loading)
-    if speed < 0.5 and vessel.get("distance", 999) > 0.5:
+    if speed < 0.5 and vessel.get("distance", 0) > 0.5:
         score += 0.2
         reasons.append("At anchorage")
 
@@ -78,7 +78,7 @@ def score_availability(vessel: dict) -> dict:
     elif score >= 0.4:
         label = "Possibly Available"
     elif score >= 0.2:
-        label = "Busy"
+        label = "Uncertain"
     else:
         label = "En Route"
 

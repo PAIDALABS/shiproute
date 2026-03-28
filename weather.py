@@ -15,7 +15,7 @@ def _risk_level(wave_height_m: float, wind_speed_kts: float) -> str:
         return "SEVERE"
     if wave_height_m > 4 or wind_speed_kts > 35:
         return "HIGH"
-    if wave_height_m > 2.5 or wind_speed_kts > 25:
+    if wave_height_m > 3.5 or wind_speed_kts > 30:
         return "MODERATE"
     return "LOW"
 

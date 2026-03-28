@@ -56,6 +56,7 @@ MONITORED_PORTS = {
         "lon": 70.22,
         "bbox": _make_bbox(22.98, 70.22, 15),
         "inner_radius_nm": 2.0,
+        "max_queue": 20,
     },
     "INKAK": {
         "name": "Kakinada",
@@ -64,6 +65,7 @@ MONITORED_PORTS = {
         "lon": 82.24,
         "bbox": _make_bbox(16.94, 82.24, 8),
         "inner_radius_nm": 2.0,
+        "max_queue": 10,
     },
     "INVTZ": {
         "name": "Vishakhapatnam",
@@ -72,6 +74,7 @@ MONITORED_PORTS = {
         "lon": 83.30,
         "bbox": _make_bbox(17.69, 83.30, 8),
         "inner_radius_nm": 2.0,
+        "max_queue": 20,
     },
     "MGTNR": {
         "name": "Toamasina",
@@ -80,6 +83,7 @@ MONITORED_PORTS = {
         "lon": 49.40,
         "bbox": _make_bbox(-18.15, 49.40, 8),
         "inner_radius_nm": 2.0,
+        "max_queue": 10,
     },
     "MGTLE": {
         "name": "Toliara",
@@ -88,6 +92,7 @@ MONITORED_PORTS = {
         "lon": 43.67,
         "bbox": _make_bbox(-23.35, 43.67, 8),
         "inner_radius_nm": 2.0,
+        "max_queue": 10,
     },
     # European ports (strong AIS Stream coverage)
     "NLRTM": {
@@ -97,6 +102,7 @@ MONITORED_PORTS = {
         "lon": 4.48,
         "bbox": _make_bbox(51.92, 4.48, 12),
         "inner_radius_nm": 2.0,
+        "max_queue": 40,
     },
     "BEANR": {
         "name": "Antwerp",
@@ -105,6 +111,7 @@ MONITORED_PORTS = {
         "lon": 4.42,
         "bbox": _make_bbox(51.23, 4.42, 8),
         "inner_radius_nm": 1.5,
+        "max_queue": 20,
     },
     "DEHAM": {
         "name": "Hamburg",
@@ -113,6 +120,45 @@ MONITORED_PORTS = {
         "lon": 9.99,
         "bbox": _make_bbox(53.54, 9.99, 10),
         "inner_radius_nm": 2.0,
+        "max_queue": 40,
+    },
+    # East African ports
+    "KEMBA": {
+        "name": "Mombasa",
+        "country": "Kenya",
+        "lat": -4.05,
+        "lon": 39.67,
+        "bbox": _make_bbox(-4.05, 39.67, 10),
+        "inner_radius_nm": 2.0,
+        "max_queue": 15,
+    },
+    "TZDAR": {
+        "name": "Dar es Salaam",
+        "country": "Tanzania",
+        "lat": -6.82,
+        "lon": 39.29,
+        "bbox": _make_bbox(-6.82, 39.29, 8),
+        "inner_radius_nm": 2.0,
+        "max_queue": 15,
+    },
+    # Additional Indian ports
+    "INNSA": {
+        "name": "Mumbai (JNPT)",
+        "country": "India",
+        "lat": 18.95,
+        "lon": 72.95,
+        "bbox": _make_bbox(18.95, 72.95, 12),
+        "inner_radius_nm": 3.0,
+        "max_queue": 25,
+    },
+    "INMUN": {
+        "name": "Mundra",
+        "country": "India",
+        "lat": 22.84,
+        "lon": 69.72,
+        "bbox": _make_bbox(22.84, 69.72, 10),
+        "inner_radius_nm": 2.5,
+        "max_queue": 20,
     },
 }
 
@@ -135,18 +181,21 @@ def classify_vessel_state(
     dist_to_port_nm: float,
     inner_radius_nm: float,
 ) -> str:
-    """Classify a vessel's operational state based on speed and position.
+    """Classify a vessel's operational state based on speed, AIS nav_status, and position.
 
     Rules (evaluated in order):
-        BERTHED   — speed < 0.3 kts AND within inner_radius_nm of port center
-        ANCHORED  — speed < 0.5 kts
+        BERTHED    — very slow + near port center, or AIS reports moored (nav_status 5)
+        ANCHORED   — slow or AIS reports at anchor (nav_status 1)
         TRANSITING — speed > 5.0 kts
         APPROACHING — everything else
     """
-    if speed < 0.3 and dist_to_port_nm <= inner_radius_nm:
+    # BERTHED — very slow, near port center, or AIS reports moored
+    if (speed < 0.3 and dist_to_port_nm <= inner_radius_nm) or nav_status == 5:
         return "BERTHED"
-    if speed < 0.5:
+    # ANCHORED — slow or AIS reports at anchor
+    if speed < 1.5 and (nav_status == 1 or speed < 0.5):
         return "ANCHORED"
+    # TRANSITING — moving fast through port area
     if speed > 5.0:
         return "TRANSITING"
     return "APPROACHING"
@@ -198,7 +247,7 @@ class CongestionEngine:
         course: float,
         heading: int,
         nav_status: Optional[int],
-        ship_type: Optional[int],
+        ship_type: Optional[str],
         name: Optional[str],
         timestamp: float,
         # Extra fields for intelligence (optional)
@@ -420,8 +469,14 @@ class CongestionEngine:
             anchor_ratio = anchored_count / max(anchored_count + berthed_count, 1)
             avg_wait = total_wait_hours / max(anchored_count, 1)
             wait_factor = min(avg_wait / 48.0, 1.0)
-            queue_pressure = min(anchored_count / 10.0, 1.0)
+            port_def = MONITORED_PORTS.get(locode, {})
+            max_queue = port_def.get("max_queue", 15)
+            queue_pressure = min(anchored_count / max_queue, 1.0)
             score = (anchor_ratio * 40) + (wait_factor * 35) + (queue_pressure * 25)
+
+        # Prevent single-vessel situations from triggering HIGH/SEVERE
+        if anchored_count < 3 and score > 50:
+            score = min(score, 50.0)
 
         score = round(score, 1)
 

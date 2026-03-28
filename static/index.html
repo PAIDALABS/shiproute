@@ -19,8 +19,8 @@
       <span class="nav-brand-title">ShipRoute</span>
     </div>
     <div id="mode-toggle">
-      <button class="mode-btn active" id="btn-voyage-mode" onclick="switchMode('voyage')">Voyage</button>
-      <button class="mode-btn" id="btn-portwatch-mode" onclick="switchMode('portwatch')">Port Watch</button>
+      <button class="mode-btn" id="btn-voyage-mode" onclick="switchMode('voyage')">Voyage</button>
+      <button class="mode-btn active" id="btn-portwatch-mode" onclick="switchMode('portwatch')">Port Watch</button>
       <button class="mode-btn" id="btn-finder-mode" onclick="switchMode('finder')">Vessel Finder</button>
       <button class="mode-btn" id="btn-weather-mode" onclick="switchMode('weather')">Weather</button>
       <button class="mode-btn" id="btn-market-mode" onclick="switchMode('market')">Market Intel</button>
@@ -31,7 +31,7 @@
   <aside id="sidebar">
 
     <!-- ── Voyage Mode ───────────────────────────────────────────────── -->
-    <div id="voyage-mode">
+    <div id="voyage-mode" class="hidden">
       <div id="brand">
         <div>
           <div class="brand-title">Voyage Planner</div>
@@ -109,7 +109,7 @@
     </div><!-- /#voyage-mode -->
 
     <!-- ── Port Watch Mode ────────────────────────────────────────────── -->
-    <div id="portwatch-mode" class="hidden">
+    <div id="portwatch-mode">
       <div><div class="brand-title">Port Watch</div><div class="brand-sub">Live congestion & cargo flow</div></div>
       <div id="live-status-bar">
         <span id="live-status-dot" class="live-dot"></span>
