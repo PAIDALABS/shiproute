@@ -2,12 +2,9 @@
 Congestion alerting — tracks severity changes and fires webhooks/logs.
 """
 
-import asyncio
-import json
 import logging
 import os
 import time
-from typing import Optional
 
 import httpx
 
@@ -22,10 +19,24 @@ _last_severity: dict[str, str] = {}
 _last_alert_time: dict[str, float] = {}
 ALERT_COOLDOWN_SECONDS = 1800  # 30 min between alerts for same port
 
+# Recent alerts buffer (read-only access via get_recent_alerts)
+_recent_alerts: list[dict] = []
+_MAX_RECENT = 100
+
+
+def get_recent_alerts() -> list[dict]:
+    """Read-only: return recent alerts without mutating state."""
+    return list(_recent_alerts)
+
+
+def _update_severity_baseline(locode: str, severity: str) -> None:
+    """Update the last-known severity for a port (write operation)."""
+    _last_severity[locode] = severity
+
 
 def check_alerts(engine: CongestionEngine) -> list[dict]:
-    """Check all ports for severity changes. Returns list of triggered alerts."""
-    alerts = []
+    """Detect severity changes and update baseline. Called only from background loop."""
+    alerts: list[dict] = []
     now = time.time()
 
     for locode in MONITORED_PORTS:
@@ -58,7 +69,31 @@ def check_alerts(engine: CongestionEngine) -> list[dict]:
                 _last_alert_time[locode] = now
                 logger.warning("ALERT: %s", alert["message"])
 
-        _last_severity[locode] = severity
+        # Detect severity de-escalation
+        if prev is not None and severity_order.get(severity, 0) < severity_order.get(prev, 0):
+            if severity_order.get(prev, 0) >= 2:  # Only alert on de-escalation from HIGH or SEVERE
+                alert = {
+                    "type": "congestion_de_escalation",
+                    "locode": locode,
+                    "port": port_name,
+                    "previous_severity": prev,
+                    "current_severity": severity,
+                    "congestion_score": metrics["congestion_score"],
+                    "anchored": metrics["anchored_count"],
+                    "berthed": metrics["berthed_count"],
+                    "timestamp": now,
+                    "message": f"{port_name} congestion eased from {prev} to {severity} "
+                               f"(score: {metrics['congestion_score']})",
+                }
+                alerts.append(alert)
+                logger.info("CLEARED: %s", alert["message"])
+
+        _update_severity_baseline(locode, severity)
+
+    # Buffer recent alerts for read-only access
+    _recent_alerts.extend(alerts)
+    if len(_recent_alerts) > _MAX_RECENT:
+        del _recent_alerts[:-_MAX_RECENT]
 
     return alerts
 
@@ -76,7 +111,7 @@ async def fire_webhook(alerts: list[dict]) -> None:
                     timeout=10,
                 )
     except Exception:
-        logger.debug("Failed to fire alert webhook", exc_info=True)
+        logger.error("Failed to fire alert webhook", exc_info=True)
 
 
 async def process_alerts(engine: CongestionEngine) -> list[dict]:

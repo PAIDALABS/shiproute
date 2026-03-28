@@ -1682,7 +1682,7 @@ document.getElementById('weather-route-btn')?.addEventListener('click', async ()
     const res = await fetch('/api/weather/route', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ route_geojson: routeGeoJSON, speed_knots: speed }),
+      body: JSON.stringify({ route_geojson: routeGeoJSON, speed_knots: speed, departure_time: new Date().toISOString() }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -1711,7 +1711,7 @@ function renderRouteWeather(data) {
     });
     const wx = p.weather || {};
     marker.bindTooltip(`
-      <strong>${p.distance_nmi} nmi</strong> — ${p.risk_level}<br>
+      <strong>${p.distance_nmi} nmi</strong> — ${p.risk_level}${p.is_forecast ? ' (forecast)' : p.risk_level === 'UNKNOWN' ? ' (beyond forecast)' : ' (current)'}<br>
       Waves: ${wx.wave_height_m?.toFixed(1) || '?'}m<br>
       Swell: ${wx.swell_height_m?.toFixed(1) || '?'}m
     `, { sticky: true });

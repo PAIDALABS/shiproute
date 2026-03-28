@@ -5,10 +5,10 @@ Receives vessel position updates (from AIS stream), classifies vessel state,
 and computes per-port congestion metrics.
 """
 
-import asyncio
 import json
 import logging
 import math
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -224,9 +224,6 @@ class CongestionEngine:
         }
         # Reverse lookup: mmsi -> locode (a vessel can only be in one port)
         self._vessel_port: dict[int, str] = {}
-        # Guards concurrent read/write access from background poller vs request handlers
-        self._lock = asyncio.Lock()
-
         # Completed port visits for turnaround analysis
         # {locode: [visit_dict, ...]}
         self._completed_visits: dict[str, list[dict]] = {
@@ -257,12 +254,18 @@ class CongestionEngine:
                 for locode, vessels in self._port_vessels.items()
             },
             "vessel_port": {str(k): v for k, v in self._vessel_port.items()},
+            "completed_visits": {
+                locode: visits for locode, visits in self._completed_visits.items()
+            },
+            "score_history": {
+                locode: entries for locode, entries in self._score_history.items()
+            },
             "saved_at": time.time(),
         }
         tmp = STATE_FILE.with_suffix(".tmp")
         with open(tmp, "w") as f:
             json.dump(state, f)
-        tmp.rename(STATE_FILE)  # atomic on POSIX
+        os.replace(tmp, STATE_FILE)
 
     def load_state(self) -> bool:
         """Restore vessel state from disk. Returns True if state was loaded."""
@@ -280,6 +283,12 @@ class CongestionEngine:
                 if locode in self._port_vessels:
                     self._port_vessels[locode] = {int(mmsi): v for mmsi, v in vessels.items()}
             self._vessel_port = {int(k): v for k, v in state.get("vessel_port", {}).items()}
+            for locode, visits in state.get("completed_visits", {}).items():
+                if locode in self._completed_visits:
+                    self._completed_visits[locode] = visits
+            for locode, entries in state.get("score_history", {}).items():
+                if locode in self._score_history:
+                    self._score_history[locode] = [(t, s) for t, s in entries]
             logging.info("Restored engine state: %d vessels from %.0f min ago",
                         sum(len(v) for v in self._port_vessels.values()), age_minutes)
             return True
@@ -516,6 +525,7 @@ class CongestionEngine:
         total_vessels = len(vessels)
 
         # Congestion score
+        avg_wait = 0.0
         if total_vessels == 0:
             score = 0.0
         else:
@@ -550,6 +560,7 @@ class CongestionEngine:
             "berthed_count": berthed_count,
             "approaching_count": approaching_count,
             "transiting_count": transiting_count,
+            "avg_wait_hours": round(avg_wait, 1),
         }
 
     def get_all_ports_summary(self) -> list[dict]:

@@ -18,11 +18,11 @@ from ports_loader import PortsLoader
 from congestion_engine import CongestionEngine
 from ais_stream import run_ais_stream
 from cargo_flow import compute_cargo_flow, compute_all_ports_flow, save_daily_snapshot
-from voyage_planner import calculate_multi_leg, estimate_fuel_cost
+from voyage_planner import calculate_multi_leg
 from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track
 from weather import get_route_weather, get_port_weather
 from market_intel import get_market_overview, get_africa_corridor
-from alerts import process_alerts, check_alerts
+
 
 # ── Database connection ───────────────────────────────────────────────────────
 
@@ -48,6 +48,7 @@ async def lifespan(app):
     task.cancel()
     snapshot_task.cancel()
     alert_task.cancel()
+    await asyncio.gather(task, snapshot_task, alert_task, return_exceptions=True)
 
 app = FastAPI(title="ShipRoute", lifespan=lifespan)
 
@@ -409,9 +410,10 @@ def get_live_status():
 
 
 @app.get("/api/alerts/recent")
-async def get_recent_alerts():
-    """Check current alert state across all ports."""
-    alerts = check_alerts(engine)
+def get_recent_alerts_endpoint():
+    """Return recent alerts without mutating state."""
+    from alerts import get_recent_alerts
+    alerts = get_recent_alerts()
     return {"alerts": alerts, "count": len(alerts)}
 
 
@@ -472,7 +474,7 @@ async def get_port_intelligence(locode: str):
     # Identify General Cargo / Multi Purpose vessels with African port destinations
     # These are the most likely bagged cargo carriers
     africa_keywords = [
-        "AFRICA", "MOMBASA", "DAR", "MAPUTO", "DJIBOUTI", "MOGADISHU",
+        "AFRICA", "MOMBASA", "DAR ES SALAAM", "MAPUTO", "DJIBOUTI", "MOGADISHU",
         "LAGOS", "APAPA", "TEMA", "ABIDJAN", "DAKAR", "LUANDA", "DOUALA",
         "DURBAN", "CAPE TOWN", "PORT ELIZABETH", "BEIRA", "NACALA",
         "TOAMASINA", "TAMATAVE", "ZANZIBAR", "LAMU", "BERBERA",
@@ -553,6 +555,10 @@ async def get_live_cargo(locode: str):
         v for v in vessels if v.get("state") in ("BERTHED", "ANCHORED")
     ][:30]
 
+    def _num(val):
+        try: return float(val) if val else 0
+        except (TypeError, ValueError): return 0
+
     cargo_vessels = []
     async with httpx.AsyncClient() as client:
         for v in target_vessels:
@@ -570,10 +576,6 @@ async def get_live_cargo(locode: str):
                 info = resp.json().get("data", {})
                 if not info:
                     continue
-
-                def _num(v):
-                    try: return float(v) if v else 0
-                    except (TypeError, ValueError): return 0
 
                 dwt = _num(info.get("deadweight"))
                 draught_avg = _num(info.get("draught_avg"))
@@ -1186,6 +1188,8 @@ async def _alert_loop():
 async def _snapshot_loop():
     """Save daily cargo snapshots and engine state for historical analysis."""
     from congestion_engine import MONITORED_PORTS
+    for locode in MONITORED_PORTS:
+        engine.record_score(locode)
     while True:
         await asyncio.sleep(3600)  # every hour
         try:

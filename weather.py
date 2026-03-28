@@ -93,6 +93,8 @@ async def get_route_weather(
 
     # Calculate ETA at each point
     dep = datetime.fromisoformat(departure_time) if departure_time else datetime.now(timezone.utc)
+    if dep.tzinfo is None:
+        dep = dep.replace(tzinfo=timezone.utc)
     for p in points:
         hours_to_point = p["distance_nmi"] / speed_knots if speed_knots > 0 else 0
         p["eta"] = (dep + timedelta(hours=hours_to_point)).isoformat()
@@ -112,6 +114,11 @@ async def get_route_weather(
             p["weather"] = None
             p["risk_level"] = "UNKNOWN"
             p["risk_color"] = "#8b949e"
+        elif wx.get("beyond_forecast"):
+            p["weather"] = wx
+            p["risk_level"] = "UNKNOWN"
+            p["risk_color"] = "#8b949e"
+            p["is_forecast"] = False
         else:
             p["weather"] = wx
             p["is_forecast"] = wx.get("forecast", False)
@@ -150,7 +157,15 @@ async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float,
         use_forecast = False
         if eta:
             hours_ahead = (eta - datetime.now(timezone.utc)).total_seconds() / 3600
-            use_forecast = 0 < hours_ahead <= 168  # 7 days
+            if hours_ahead > 168:
+                return {
+                    "wave_height_m": 0, "wave_direction": 0, "wave_period_s": 0,
+                    "wind_wave_height_m": 0, "swell_height_m": 0, "wind_speed_kts": 0,
+                    "forecast": False, "beyond_forecast": True,
+                }
+            use_forecast = hours_ahead > 0
+        else:
+            use_forecast = False
 
         if use_forecast:
             # Fetch hourly forecast for the ETA date
@@ -162,6 +177,7 @@ async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float,
                 "wind_speed_unit": "kn",
                 "start_date": forecast_date,
                 "end_date": forecast_date,
+                "timezone": "UTC",
             }, timeout=10)
             if resp.status_code == 200:
                 hourly = resp.json().get("hourly", {})
@@ -182,6 +198,7 @@ async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float,
                 "hourly": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
                 "start_date": forecast_date,
                 "end_date": forecast_date,
+                "timezone": "UTC",
             }, timeout=10)
             if resp.status_code != 200:
                 return None
