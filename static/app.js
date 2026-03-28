@@ -607,6 +607,18 @@ function levelClass(level) {
   return `severity-${(level || 'low').toLowerCase()}`;
 }
 
+// ── Sort button wiring ─────────────────────────────────────────────────────
+document.querySelectorAll('.sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentSortKey = btn.dataset.sort;
+    if (liveData && liveData.ports) {
+      renderLivePortList(liveData.ports);
+    }
+  });
+});
+
 // ── Port detail panel ──────────────────────────────────────────────────────
 async function openPortDetail(locode) {
   selectedPortLocode = locode;
@@ -894,7 +906,13 @@ function renderLivePortList(ports) {
     return;
   }
 
-  const sorted = [...ports].sort((a, b) => b.congestion_score - a.congestion_score);
+  const sorted = [...ports].sort((a, b) => {
+    if (currentSortKey === 'score') return b.congestion_score - a.congestion_score;
+    if (currentSortKey === 'wait') return (b.avg_wait_hours || 0) - (a.avg_wait_hours || 0);
+    if (currentSortKey === 'vessels') return b.total_vessels - a.total_vessels;
+    if (currentSortKey === 'name') return a.name.localeCompare(b.name);
+    return 0;
+  });
 
   listEl.innerHTML = '';
   sorted.forEach(port => {
@@ -906,6 +924,11 @@ function renderLivePortList(ports) {
     const color     = levelColor(level);
     const total     = Number(port.total_vessels) || 0;
 
+    const delta = port.score_delta_24h;
+    const deltaHtml = delta !== null && delta !== undefined
+      ? `<span class="delta ${delta > 0 ? 'delta-up' : delta < 0 ? 'delta-down' : 'delta-flat'}">${delta > 0 ? '\u2191' : delta < 0 ? '\u2193' : '\u2192'}${Math.abs(delta).toFixed(1)}</span>`
+      : '';
+
     const item = document.createElement('div');
     item.className = 'port-list-item';
     item.dataset.locode = port.locode;
@@ -914,7 +937,7 @@ function renderLivePortList(ports) {
       <div class="pli-body">
         <div class="pli-top">
           <div class="pli-name">${escHtml(port.name)}</div>
-          <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${score}</div>
+          <div class="pli-score" style="background:${color}20;color:${color};border-color:${color}40">${score}${deltaHtml}</div>
         </div>
         <div class="pli-sub">
           <span class="pli-country">${escHtml(port.country || '')} \u00b7 ${escHtml(port.locode)}</span>

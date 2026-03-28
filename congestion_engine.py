@@ -6,9 +6,14 @@ and computes per-port congestion metrics.
 """
 
 import asyncio
+import json
+import logging
 import math
 import time
+from pathlib import Path
 from typing import Optional
+
+STATE_FILE = Path("data/engine_state.json")
 
 # ---------------------------------------------------------------------------
 # Helper: 1 nautical mile ~= 1/60 degree latitude.
@@ -228,11 +233,59 @@ class CongestionEngine:
             locode: [] for locode in MONITORED_PORTS
         }
 
+        # Score history for 24h delta tracking {locode: [(timestamp, score), ...]}
+        self._score_history: dict[str, list[tuple[float, float]]] = {
+            locode: [] for locode in MONITORED_PORTS
+        }
+
         # Stream health tracking
         self.stream_connected: bool = False
         self.connected_since: Optional[float] = None
         self.last_message_at: Optional[float] = None
         self.messages_received: int = 0
+
+    # ------------------------------------------------------------------
+    # State persistence
+    # ------------------------------------------------------------------
+
+    def save_state(self) -> None:
+        """Persist vessel state to disk for restart recovery."""
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "port_vessels": {
+                locode: {str(mmsi): v for mmsi, v in vessels.items()}
+                for locode, vessels in self._port_vessels.items()
+            },
+            "vessel_port": {str(k): v for k, v in self._vessel_port.items()},
+            "saved_at": time.time(),
+        }
+        tmp = STATE_FILE.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(state, f)
+        tmp.rename(STATE_FILE)  # atomic on POSIX
+
+    def load_state(self) -> bool:
+        """Restore vessel state from disk. Returns True if state was loaded."""
+        if not STATE_FILE.exists():
+            return False
+        try:
+            with open(STATE_FILE) as f:
+                state = json.load(f)
+            saved_at = state.get("saved_at", 0)
+            age_minutes = (time.time() - saved_at) / 60
+            if age_minutes > 60:
+                logging.info("Engine state too old (%.0f min), starting fresh", age_minutes)
+                return False
+            for locode, vessels in state.get("port_vessels", {}).items():
+                if locode in self._port_vessels:
+                    self._port_vessels[locode] = {int(mmsi): v for mmsi, v in vessels.items()}
+            self._vessel_port = {int(k): v for k, v in state.get("vessel_port", {}).items()}
+            logging.info("Restored engine state: %d vessels from %.0f min ago",
+                        sum(len(v) for v in self._port_vessels.values()), age_minutes)
+            return True
+        except Exception:
+            logging.exception("Failed to load engine state")
+            return False
 
     # ------------------------------------------------------------------
     # Core update
@@ -670,3 +723,26 @@ class CongestionEngine:
             "total_vessels_tracked": total_tracked,
             "monitored_ports": len(MONITORED_PORTS),
         }
+
+    # ------------------------------------------------------------------
+    # Score history for 24h delta tracking
+    # ------------------------------------------------------------------
+
+    def record_score(self, locode: str) -> None:
+        """Record current congestion score for delta tracking."""
+        metrics = self.get_port_metrics(locode)
+        now = time.time()
+        history = self._score_history.get(locode, [])
+        history.append((now, metrics["congestion_score"]))
+        # Keep only last 24 hours
+        cutoff = now - 86400
+        self._score_history[locode] = [(t, s) for t, s in history if t > cutoff]
+
+    def get_score_delta(self, locode: str) -> float | None:
+        """Get 24h score change. Returns None if insufficient history."""
+        history = self._score_history.get(locode, [])
+        if len(history) < 2:
+            return None
+        current = history[-1][1]
+        oldest = history[0][1]
+        return round(current - oldest, 1)

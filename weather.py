@@ -101,7 +101,8 @@ async def get_route_weather(
     async with httpx.AsyncClient() as client:
         tasks = []
         for p in points:
-            tasks.append(_fetch_marine_point(client, p["lat"], p["lon"]))
+            eta_dt = datetime.fromisoformat(p["eta"]) if p.get("eta") else None
+            tasks.append(_fetch_marine_point(client, p["lat"], p["lon"], eta_dt))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Merge weather data with points
@@ -113,6 +114,7 @@ async def get_route_weather(
             p["risk_color"] = "#8b949e"
         else:
             p["weather"] = wx
+            p["is_forecast"] = wx.get("forecast", False)
             p["risk_level"] = _risk_level(wx.get("wave_height_m", 0), wx.get("wind_speed_kts", 0))
             p["risk_color"] = _risk_color(p["risk_level"])
         weather_points.append(p)
@@ -140,28 +142,85 @@ async def get_route_weather(
     }
 
 
-async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float) -> dict | None:
-    """Fetch current marine weather for a single point."""
+async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float, eta: datetime | None = None) -> dict | None:
+    """Fetch marine weather for a single point, at the forecast hour closest to ETA."""
     try:
-        resp = await client.get(WEATHER_API, params={
-            "latitude": lat,
-            "longitude": lon,
-            "current": "wind_speed_10m",
-            "wind_speed_unit": "kn",
-        }, timeout=10)
         wind_data = {}
-        if resp.status_code == 200:
-            wc = resp.json().get("current", {})
-            wind_data["wind_speed_kts"] = wc.get("wind_speed_10m") or 0
+        # Determine if we need forecast or current
+        use_forecast = False
+        if eta:
+            hours_ahead = (eta - datetime.now(timezone.utc)).total_seconds() / 3600
+            use_forecast = 0 < hours_ahead <= 168  # 7 days
 
-        resp = await client.get(MARINE_API, params={
-            "latitude": lat,
-            "longitude": lon,
-            "current": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
-        }, timeout=10)
-        if resp.status_code != 200:
-            return None
-        data = resp.json().get("current", {})
+        if use_forecast:
+            # Fetch hourly forecast for the ETA date
+            forecast_date = eta.strftime("%Y-%m-%d")
+            resp = await client.get(WEATHER_API, params={
+                "latitude": lat,
+                "longitude": lon,
+                "hourly": "wind_speed_10m",
+                "wind_speed_unit": "kn",
+                "start_date": forecast_date,
+                "end_date": forecast_date,
+            }, timeout=10)
+            if resp.status_code == 200:
+                hourly = resp.json().get("hourly", {})
+                times = hourly.get("time", [])
+                winds = hourly.get("wind_speed_10m", [])
+                # Find closest hour to ETA
+                eta_hour = eta.strftime("%Y-%m-%dT%H:00")
+                for i, t in enumerate(times):
+                    if t >= eta_hour and i < len(winds):
+                        wind_data["wind_speed_kts"] = winds[i] or 0
+                        break
+                if "wind_speed_kts" not in wind_data and winds:
+                    wind_data["wind_speed_kts"] = winds[-1] or 0
+
+            resp = await client.get(MARINE_API, params={
+                "latitude": lat,
+                "longitude": lon,
+                "hourly": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
+                "start_date": forecast_date,
+                "end_date": forecast_date,
+            }, timeout=10)
+            if resp.status_code != 200:
+                return None
+            hourly = resp.json().get("hourly", {})
+            times = hourly.get("time", [])
+            # Find closest hour
+            idx = 0
+            for i, t in enumerate(times):
+                if t >= eta_hour:
+                    idx = i
+                    break
+            data = {
+                "wave_height": (hourly.get("wave_height") or [0])[min(idx, len(hourly.get("wave_height", [0])) - 1)],
+                "wave_direction": (hourly.get("wave_direction") or [0])[min(idx, len(hourly.get("wave_direction", [0])) - 1)],
+                "wave_period": (hourly.get("wave_period") or [0])[min(idx, len(hourly.get("wave_period", [0])) - 1)],
+                "wind_wave_height": (hourly.get("wind_wave_height") or [0])[min(idx, len(hourly.get("wind_wave_height", [0])) - 1)],
+                "swell_wave_height": (hourly.get("swell_wave_height") or [0])[min(idx, len(hourly.get("swell_wave_height", [0])) - 1)],
+            }
+        else:
+            # Current conditions (for departure point or beyond forecast range)
+            resp = await client.get(WEATHER_API, params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "wind_speed_10m",
+                "wind_speed_unit": "kn",
+            }, timeout=10)
+            if resp.status_code == 200:
+                wc = resp.json().get("current", {})
+                wind_data["wind_speed_kts"] = wc.get("wind_speed_10m") or 0
+
+            resp = await client.get(MARINE_API, params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height",
+            }, timeout=10)
+            if resp.status_code != 200:
+                return None
+            data = resp.json().get("current", {})
+
         return {
             "wave_height_m": data.get("wave_height") or 0,
             "wave_direction": data.get("wave_direction") or 0,
@@ -169,6 +228,7 @@ async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float)
             "wind_wave_height_m": data.get("wind_wave_height") or 0,
             "swell_height_m": data.get("swell_wave_height") or 0,
             "wind_speed_kts": wind_data.get("wind_speed_kts", 0),
+            "forecast": use_forecast,
         }
     except Exception:
         return None

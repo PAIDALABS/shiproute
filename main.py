@@ -22,6 +22,7 @@ from voyage_planner import calculate_multi_leg, estimate_fuel_cost
 from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track
 from weather import get_route_weather, get_port_weather
 from market_intel import get_market_overview, get_africa_corridor
+from alerts import process_alerts, check_alerts
 
 # ── Database connection ───────────────────────────────────────────────────────
 
@@ -38,11 +39,15 @@ def get_db():
 
 @asynccontextmanager
 async def lifespan(app):
+    engine.load_state()
     task = asyncio.create_task(run_ais_stream(engine))
     snapshot_task = asyncio.create_task(_snapshot_loop())
+    alert_task = asyncio.create_task(_alert_loop())
     yield
+    engine.save_state()
     task.cancel()
     snapshot_task.cancel()
+    alert_task.cancel()
 
 app = FastAPI(title="ShipRoute", lifespan=lifespan)
 
@@ -384,8 +389,11 @@ async def get_arrival_advisory(locode: str):
 @app.get("/api/congestion/live")
 def get_live_congestion():
     """Return live congestion summary for all monitored ports."""
+    ports = engine.get_all_ports_summary()
+    for p in ports:
+        p["score_delta_24h"] = engine.get_score_delta(p["locode"])
     return {
-        "ports": engine.get_all_ports_summary(),
+        "ports": ports,
         "stream_status": "connected" if engine.stream_connected else "connecting",
         "last_message_at": (
             _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(engine.last_message_at))
@@ -398,6 +406,13 @@ def get_live_congestion():
 def get_live_status():
     """Return AIS Stream connection health."""
     return engine.get_status()
+
+
+@app.get("/api/alerts/recent")
+async def get_recent_alerts():
+    """Check current alert state across all ports."""
+    alerts = check_alerts(engine)
+    return {"alerts": alerts, "count": len(alerts)}
 
 
 @app.get("/health")
@@ -1157,12 +1172,27 @@ def get_port_timeline(locode: str):
             conn.close()
 
 
+async def _alert_loop():
+    """Check for congestion alerts every poll cycle."""
+    from alerts import process_alerts
+    while True:
+        await asyncio.sleep(150)  # slightly after AIS poll (120s)
+        try:
+            await process_alerts(engine)
+        except Exception:
+            logging.debug("Alert check failed", exc_info=True)
+
+
 async def _snapshot_loop():
-    """Save daily cargo snapshots for historical analysis."""
+    """Save daily cargo snapshots and engine state for historical analysis."""
+    from congestion_engine import MONITORED_PORTS
     while True:
         await asyncio.sleep(3600)  # every hour
         try:
+            for locode in MONITORED_PORTS:
+                engine.record_score(locode)
             save_daily_snapshot(engine)
+            engine.save_state()
         except Exception:
             logging.exception("Failed to save daily cargo snapshot")
 
