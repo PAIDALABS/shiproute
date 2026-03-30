@@ -28,6 +28,14 @@ from datetime import datetime
 import httpx
 
 
+def _safe_float(val):
+    """Safely convert a value to float, returning 0 on failure."""
+    try:
+        return float(val) if val else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def compute_instant_intelligence(vessels: list[dict], port_def: dict) -> dict:
     """Compute all metrics that need NO extra API calls."""
 
@@ -194,13 +202,8 @@ async def enrich_with_specs(vessels: list[dict], api_key: str, max_vessels: int 
 
     size_counter = Counter()
     for s in specs:
-        def _n(v):
-            try:
-                return float(v) if v else 0
-            except (TypeError, ValueError):
-                return 0
-        dwt = _n(s.get("deadweight"))
-        length = _n(s.get("length"))
+        dwt = _safe_float(s.get("deadweight"))
+        length = _safe_float(s.get("length"))
         cls = _classify_size(dwt, length)
         size_counter[cls] += 1
     size_classes = [{"class": c, "count": n} for c, n in size_counter.most_common()]
@@ -214,16 +217,10 @@ async def enrich_with_specs(vessels: list[dict], api_key: str, max_vessels: int 
     dwt_by_type = Counter()
 
     for s in specs:
-        def _n(v):
-            try:
-                return float(v) if v else 0
-            except (TypeError, ValueError):
-                return 0
-
-        dwt = _n(s.get("deadweight"))
-        davg = _n(s.get("draught_avg"))
-        dmax = _n(s.get("draught_max"))
-        teu = int(_n(s.get("teu")))
+        dwt = _safe_float(s.get("deadweight"))
+        davg = _safe_float(s.get("draught_avg"))
+        dmax = _safe_float(s.get("draught_max"))
+        teu = int(_safe_float(s.get("teu")))
         vtype = s.get("type_specific") or s.get("type") or "Unknown"
 
         total_dwt += dwt

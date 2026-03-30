@@ -15,7 +15,7 @@ import logging
 import time as _time
 
 from ports_loader import PortsLoader
-from congestion_engine import CongestionEngine
+from congestion_engine import CongestionEngine, MONITORED_PORTS
 from ais_stream import run_ais_stream
 from cargo_flow import compute_cargo_flow, compute_all_ports_flow, save_daily_snapshot
 from voyage_planner import calculate_multi_leg
@@ -335,7 +335,6 @@ async def get_arrival_advisory(locode: str):
     if metrics["total_vessels"] == 0:
         return {"locode": locode_upper, "monitored": False, "message": "Port not actively monitored"}
 
-    from congestion_engine import MONITORED_PORTS
     port_def = MONITORED_PORTS.get(locode_upper)
     if not port_def:
         return {"locode": locode_upper, "monitored": False, "message": "Port not in monitoring list"}
@@ -345,8 +344,7 @@ async def get_arrival_advisory(locode: str):
     berthed = metrics["berthed_count"]
 
     # Compute avg wait from anchored vessels
-    import time as _t
-    _now = _t.time()
+    _now = _time.time()
     _vessels = engine.get_vessels_snapshot(locode_upper)
     _waits = [(_now - v["state_since"]) / 3600.0 for v in _vessels.values() if v["state"] == "ANCHORED"]
     avg_wait = round(sum(_waits) / len(_waits), 1) if _waits else 0
@@ -435,7 +433,6 @@ async def get_port_intelligence(locode: str):
     """Comprehensive port intelligence — flag, type, size, cargo, origins, Africa bagged cargo leads."""
     from ais_stream import DATALASTIC_API_KEY
     from port_intelligence import compute_instant_intelligence, enrich_with_specs, trace_origins
-    from congestion_engine import MONITORED_PORTS
 
     locode_upper = locode.upper()
     port_detail = engine.get_port_detail(locode_upper)
@@ -620,6 +617,7 @@ async def get_live_cargo(locode: str):
                 })
                 await asyncio.sleep(0.2)  # rate limit
             except Exception:
+                logging.debug("Failed to fetch cargo specs for MMSI %s", mmsi, exc_info=True)
                 continue
 
     # Aggregate by vessel type
@@ -648,7 +646,6 @@ async def get_live_cargo(locode: str):
     all_loads = [cv["load_pct"] for cv in cargo_vessels if cv["load_pct"] is not None]
     all_teu = sum(cv["teu_capacity"] for cv in cargo_vessels if cv["teu_capacity"])
 
-    from congestion_engine import MONITORED_PORTS
     port_def = MONITORED_PORTS.get(locode_upper, {})
 
     return {
@@ -677,7 +674,6 @@ async def get_live_turnaround(locode: str):
     if not port_detail:
         raise HTTPException(status_code=404, detail=f"Port {locode} not monitored")
 
-    from congestion_engine import MONITORED_PORTS
     port_def = MONITORED_PORTS.get(locode_upper)
 
     if not port_def:
@@ -782,6 +778,7 @@ async def get_live_turnaround(locode: str):
                 })
 
             except Exception:
+                logging.debug("Failed to fetch turnaround history for MMSI %s", mmsi, exc_info=True)
                 continue
 
     if not visit_data:
@@ -1187,7 +1184,6 @@ async def _alert_loop():
 
 async def _snapshot_loop():
     """Save daily cargo snapshots and engine state for historical analysis."""
-    from congestion_engine import MONITORED_PORTS
     for locode in MONITORED_PORTS:
         engine.record_score(locode)
     while True:

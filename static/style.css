@@ -1749,3 +1749,67 @@ html, body {
   border-color: var(--accent);
   background: rgba(33, 150, 243, .06);
 }
+
+/* ── Mobile Responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  :root {
+    --sidebar-w: 100vw;
+  }
+
+  html, body {
+    overflow: auto;
+  }
+
+  #sidebar {
+    position: relative;
+    top: 48px;
+    width: 100%;
+    height: auto;
+    max-height: 50vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #map {
+    position: relative;
+    top: 48px;
+    left: 0;
+    width: 100%;
+    height: 50vh;
+  }
+
+  #mode-toggle {
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+
+  .mode-btn {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  #port-detail {
+    width: 100%;
+    right: 0;
+  }
+
+  .port-sort-bar {
+    padding: 0 8px 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .mode-btn {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .onboard-examples {
+    flex-direction: column;
+  }
+}

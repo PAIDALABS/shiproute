@@ -1,6 +1,7 @@
 """Weather integration using Open-Meteo Marine API (free, no key required)."""
 
 import asyncio
+import logging
 import math
 from datetime import datetime, timezone, timedelta
 
@@ -252,6 +253,7 @@ async def _fetch_marine_point(client: httpx.AsyncClient, lat: float, lon: float,
                 "forecast": use_forecast,
             }
         except Exception:
+            logging.debug("Failed to fetch marine weather for (%.2f, %.2f)", lat, lon, exc_info=True)
             return None
 
 
