@@ -1868,6 +1868,22 @@ html, body {
 #cc-vessels-list::-webkit-scrollbar-track { background:transparent; }
 #cc-vessels-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 
+/* ── Fleet Dashboard ─────────────────────────────────────────────── */
+.fleet-filters { display:flex; flex-direction:column; gap:6px; }
+.fleet-filter-row { display:flex; gap:6px; align-items:center; }
+.fleet-filter-row select { flex:1; font-size:12px; padding:5px 6px; }
+.fleet-filter-row input[type="text"] { flex:1; font-size:12px; padding:5px 6px; }
+
+.fleet-arrival-port { margin-bottom:6px; }
+.fleet-arrival-header {
+  font-size:12px; font-weight:600; color:var(--text);
+  display:flex; align-items:center; gap:6px;
+}
+.fleet-arrival-vessel {
+  font-size:11px; color:var(--text2); padding-left:8px;
+  border-left:2px solid var(--border); margin:2px 0;
+}
+
 /* ── Mobile Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 768px) {

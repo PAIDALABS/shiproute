@@ -219,3 +219,13 @@ def test_live_status_endpoint():
     data = resp.json()
     assert "total_vessels_tracked" in data
     assert "monitored_ports" in data
+
+
+def test_fleet_overview():
+    resp = client.get("/api/fleet/all")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "vessels" in data
+    assert "ports" in data
+    assert "inbound" in data
+    assert data["ports_monitored"] == 12

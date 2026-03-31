@@ -428,6 +428,67 @@ def health_check():
     }
 
 
+@app.get("/api/fleet/all")
+def get_fleet_overview():
+    """All vessels across all ports with inbound tracking."""
+    all_vessels = []
+    port_stats = []
+    for locode, port_def in MONITORED_PORTS.items():
+        vessels = engine.get_vessels_snapshot(locode)
+        metrics = engine.get_port_metrics(locode)
+        port_stats.append({
+            "locode": locode, "name": port_def["name"],
+            "country": port_def["country"],
+            "lat": port_def["lat"], "lon": port_def["lon"],
+            **metrics,
+            "score_delta_24h": engine.get_score_delta(locode),
+        })
+        now = _time.time()
+        for mmsi, v in vessels.items():
+            v_copy = dict(v)
+            v_copy["port_locode"] = locode
+            v_copy["port_name"] = port_def["name"]
+            # Compute wait hours for anchored vessels
+            if v_copy.get("state") == "ANCHORED":
+                v_copy["wait_hours"] = round((now - v_copy.get("state_since", now)) / 3600, 1)
+            else:
+                v_copy["wait_hours"] = 0
+            all_vessels.append(v_copy)
+
+    # Build inbound lists: vessels at OTHER ports whose destination matches this port
+    inbound = {}
+    for locode, port_def in MONITORED_PORTS.items():
+        port_keywords = [locode, port_def["name"].split("(")[0].strip().upper()]
+        # Also add common alternate names
+        full_name = port_def["name"].upper()
+        if "(" in port_def["name"]:
+            alt = port_def["name"].split("(")[1].rstrip(")").strip().upper()
+            port_keywords.append(alt)
+        port_keywords.append(full_name)
+
+        incoming = []
+        for v in all_vessels:
+            if v["port_locode"] == locode:
+                continue
+            dest = (v.get("destination") or "").upper()
+            if dest and any(kw in dest for kw in port_keywords):
+                incoming.append({
+                    "mmsi": v["mmsi"], "name": v.get("name"),
+                    "type": v.get("type_specific") or v.get("ship_type"),
+                    "from_port": v["port_name"], "from_locode": v["port_locode"],
+                    "state": v["state"], "speed": v.get("speed", 0),
+                })
+        inbound[locode] = {"count": len(incoming), "vessels": incoming}
+
+    return {
+        "vessels": all_vessels,
+        "total": len(all_vessels),
+        "ports": port_stats,
+        "inbound": inbound,
+        "ports_monitored": len(MONITORED_PORTS),
+    }
+
+
 @app.get("/api/congestion/live/{locode}/intelligence")
 async def get_port_intelligence(locode: str):
     """Comprehensive port intelligence — flag, type, size, cargo, origins, Africa bagged cargo leads."""
