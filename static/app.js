@@ -508,7 +508,8 @@ function makeIcon(color, symbol) {
 }
 
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
@@ -572,10 +573,10 @@ function switchMode(mode) {
   closePortDetail();
   if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
   if (markersLayer) { markersLayer.remove(); markersLayer = null; }
-  if (ccRouteLayer) { ccRouteLayer.remove(); ccRouteLayer = null; }
-  ccVesselMarkers.clearLayers();
-  ccWeatherMarkers.clearLayers();
-  ccPortMarkers.clearLayers();
+  if (ccRouteLayer) ccRouteLayer.remove();
+  ccVesselMarkers.remove();
+  ccWeatherMarkers.remove();
+  ccPortMarkers.remove();
 
   if (mode === 'voyage') {
     voyageEl.classList.remove('hidden');
@@ -1572,8 +1573,6 @@ let selectedWeatherPort = null;
   createPortAutocomplete(inp, dd, (port) => {
     selectedWeatherPort = { locode: port.locode, name: port.name };
     inp.value = `${port.name} (${port.locode})`;
-  }, {
-    debounce: 250,
   });
 })();
 
@@ -1875,6 +1874,9 @@ document.querySelectorAll('.onboard-btn').forEach(btn => {
   const destDD = $('cc-dest-dropdown');
   if (!originInput || !destInput) return;
 
+  originInput.setAttribute('aria-label', 'Origin port');
+  destInput.setAttribute('aria-label', 'Destination port');
+
   createPortAutocomplete(originInput, originDD, (port) => {
     ccOriginPort = { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode };
     originInput.value = `${port.name} (${port.locode})`;
@@ -1900,7 +1902,7 @@ async function fetchCCPortQuickIntel(locode, targetId) {
     if (!d.monitored) { el.innerHTML = '<div class="cc-muted">Not in live monitoring</div>'; return; }
     const col = levelColor(d.severity);
     el.innerHTML = `<div class="cc-port-quick" style="border-left:3px solid ${col}">
-      <div class="cc-quick-row"><span>${severityIcon(d.severity)} ${d.severity}</span><span style="color:${col};font-weight:700">${d.congestion_score}</span></div>
+      <div class="cc-quick-row"><span>${severityIcon(d.severity)} ${escHtml(d.severity)}</span><span style="color:${col};font-weight:700">${escHtml(String(d.congestion_score))}</span></div>
       <div class="cc-quick-row"><span>${d.current_queue} in queue</span><span>${d.estimated_wait_hours > 0 ? d.estimated_wait_hours + 'h wait' : 'No wait'}</span></div>
     </div>`;
   } catch { el.innerHTML = ''; }
@@ -1911,6 +1913,7 @@ async function calculateCommandCenter() {
   hideCCError();
   const btn = $('cc-calc-btn');
   btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
   $('cc-loading').classList.remove('hidden');
 
   // Clear previous
@@ -1950,6 +1953,7 @@ async function calculateCommandCenter() {
 
     $('cc-loading').classList.add('hidden');
     btn.disabled = false;
+    btn.setAttribute('aria-busy', 'false');
 
     // RENDER BATCH 1
     renderCCRoute(route, speed, fuelCons);
@@ -1981,11 +1985,12 @@ async function calculateCommandCenter() {
   } catch (err) {
     $('cc-loading').classList.add('hidden');
     btn.disabled = false;
+    btn.setAttribute('aria-busy', 'false');
     showCCError(err.message || 'Calculation failed');
   }
 }
 
-function showCCError(msg) { const e = $('cc-error'); if(e){e.textContent=msg;e.classList.remove('hidden');} }
+function showCCError(msg) { const e = $('cc-error'); if(e){e.textContent=msg;e.classList.remove('hidden');e.setAttribute('role','alert');} }
 function hideCCError() { $('cc-error')?.classList.add('hidden'); }
 
 // ── Command Center: Sidebar Render Functions ─────────────────────────────
@@ -2014,9 +2019,9 @@ function renderCCDestIntel(adv) {
   const col = levelColor(adv.severity);
   el.innerHTML = `<div class="cc-section-header">Destination Intel</div>
     <div class="cc-dest-card" style="border-left:3px solid ${col}">
-      <div class="cc-quick-row"><span>Expected wait</span><span style="font-weight:700;color:${col}">${adv.estimated_wait_hours > 0 ? adv.estimated_wait_hours+'h' : 'Minimal'}</span></div>
-      <div class="cc-quick-row"><span>Queue</span><span>${adv.current_queue} anchored · ${adv.berths_occupied} berthed</span></div>
-      <div class="cc-quick-row"><span>Score</span><span>${severityIcon(adv.severity)} ${adv.congestion_score} ${adv.severity}</span></div>
+      <div class="cc-quick-row"><span>Expected wait</span><span style="font-weight:700;color:${col}">${adv.estimated_wait_hours > 0 ? escHtml(String(adv.estimated_wait_hours))+'h' : 'Minimal'}</span></div>
+      <div class="cc-quick-row"><span>Queue</span><span>${escHtml(String(adv.current_queue))} anchored · ${escHtml(String(adv.berths_occupied))} berthed</span></div>
+      <div class="cc-quick-row"><span>Score</span><span>${severityIcon(adv.severity)} ${escHtml(String(adv.congestion_score))} ${escHtml(adv.severity)}</span></div>
       <div style="font-size:11px;color:var(--text2);margin-top:4px">${escHtml(adv.recommendation)}</div>
     </div>`;
 }
@@ -2059,7 +2064,7 @@ function renderCCWeather(wx) {
   const counts = { LOW:0, MODERATE:0, HIGH:0, SEVERE:0 };
   (wx.weather_points||[]).forEach(p => { if (counts[p.risk_level] !== undefined) counts[p.risk_level]++; });
   let html = `<div style="text-align:center;padding:6px;background:var(--bg3);border-radius:6px;margin-bottom:6px">
-    <div style="font-size:14px;font-weight:700;color:${wx.overall_risk_color}">${wx.overall_risk} RISK</div>
+    <div style="font-size:14px;font-weight:700;color:${levelColor(wx.overall_risk)}">${escHtml(wx.overall_risk)} RISK</div>
   </div>
   <div class="intel-grid">
     <div class="intel-card"><div class="intel-val good">${counts.LOW}</div><div class="intel-label">Low</div></div>
@@ -2138,7 +2143,7 @@ function renderCCPortsOnMap(origCong, destCong) {
     const c = L.circleMarker([port.lat, port.lon], {
       radius:18, color:col, weight:3, opacity:0.8, fillColor:col, fillOpacity:0.2,
     });
-    c.bindTooltip(`${escHtml(port.name)}<br>${severityIcon(cong.severity)} ${cong.severity} (${cong.congestion_score})`, {className:'port-tooltip'});
+    c.bindTooltip(`${escHtml(port.name)}<br>${severityIcon(cong.severity)} ${escHtml(cong.severity)} (${escHtml(String(cong.congestion_score))})`, {className:'port-tooltip'});
     c.on('click', () => openLivePortDetail(port.locode));
     ccPortMarkers.addLayer(c);
   });

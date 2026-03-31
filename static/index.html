@@ -107,7 +107,7 @@
       </div>
 
       <button id="calc-btn">Calculate Voyage</button>
-      <div id="error-box" class="hidden"></div>
+      <div id="error-box" class="hidden" role="alert"></div>
 
       <!-- Voyage Results -->
       <div id="voyage-results" class="hidden">
@@ -150,7 +150,7 @@
       <div class="waypoint-block">
         <div class="waypoint-label"><span class="dot dot-origin"></span> Search Near Port</div>
         <div class="autocomplete-wrap">
-          <input class="inp" type="text" id="finder-port-search" placeholder="Port name or LOCODE..." autocomplete="off" />
+          <input class="inp" type="text" id="finder-port-search" placeholder="Port name or LOCODE..." autocomplete="off" aria-label="Search ports" />
           <div class="dropdown" id="finder-port-dropdown"></div>
         </div>
       </div>
@@ -173,7 +173,7 @@
       </div>
 
       <button id="finder-search-btn">Search Vessels</button>
-      <div id="finder-loading" class="hidden"><div class="spinner"></div>Searching...</div>
+      <div id="finder-loading" class="hidden" role="status" aria-live="polite"><div class="spinner"></div>Searching...</div>
       <div id="finder-results"></div>
     </div><!-- /#finder-mode -->
 
@@ -184,7 +184,7 @@
       <div class="waypoint-block">
         <div class="waypoint-label"><span class="dot dot-origin"></span> Port Weather</div>
         <div class="autocomplete-wrap">
-          <input class="inp" type="text" id="weather-port-search" placeholder="Search port..." autocomplete="off" />
+          <input class="inp" type="text" id="weather-port-search" placeholder="Search port..." autocomplete="off" aria-label="Search ports" />
           <div class="dropdown" id="weather-port-dropdown"></div>
         </div>
       </div>
@@ -215,7 +215,7 @@
         <div class="waypoint-block">
           <div class="waypoint-label"><span class="dot dot-origin"></span> Origin Port</div>
           <div class="autocomplete-wrap">
-            <input class="inp" type="text" id="cc-origin-search" placeholder="Search origin port..." autocomplete="off" />
+            <input class="inp" type="text" id="cc-origin-search" placeholder="Search origin port..." autocomplete="off" aria-label="Origin port" />
             <div class="dropdown" id="cc-origin-dropdown"></div>
           </div>
         </div>
@@ -226,7 +226,7 @@
         <div class="waypoint-block">
           <div class="waypoint-label"><span class="dot dot-dest"></span> Destination Port</div>
           <div class="autocomplete-wrap">
-            <input class="inp" type="text" id="cc-dest-search" placeholder="Search destination port..." autocomplete="off" />
+            <input class="inp" type="text" id="cc-dest-search" placeholder="Search destination port..." autocomplete="off" aria-label="Destination port" />
             <div class="dropdown" id="cc-dest-dropdown"></div>
           </div>
         </div>
@@ -245,8 +245,8 @@
         <button id="cc-calc-btn" class="calc-btn">Calculate Voyage</button>
       </div>
 
-      <div id="cc-loading" class="hidden" style="display:flex;align-items:center;gap:8px;padding:8px 0"><div class="spinner"></div>Calculating...</div>
-      <div id="cc-error" class="hidden"></div>
+      <div id="cc-loading" class="hidden" role="status" aria-live="polite"><div class="spinner"></div>Calculating...</div>
+      <div id="cc-error" class="hidden" role="alert"></div>
 
       <div id="cc-route-summary" class="hidden"></div>
 

@@ -9,13 +9,23 @@
   --accent:    #2196f3;
   --accent2:   #0d47a1;
   --text:      #e6edf3;
-  --text2:     #8b949e;
+  --text2:     #9ea8b3;
   --success:   #3fb950;
   --danger:    #f85149;
   --origin:    #26a69a;
   --dest:      #ef5350;
   --sidebar-w: 320px;
   --radius:    8px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.inp:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
 }
 
 html, body {
@@ -274,6 +284,7 @@ html, body {
 
 #calc-btn:hover  { background: #1976d2; }
 #calc-btn:active { transform: scale(.98); }
+#calc-btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ── Error box ───────────────────────────────────────────────────────────── */
 #error-box {
@@ -1141,7 +1152,7 @@ html, body {
 .flow-stat-val.warn { color: #ff9800; }
 
 .flow-stat-label {
-  font-size: 8px;
+  font-size: 10px;
   color: var(--text2);
   text-transform: uppercase;
 }
@@ -1201,7 +1212,7 @@ html, body {
 .intel-val.hot { color: var(--danger); }
 
 .intel-label {
-  font-size: 8px;
+  font-size: 10px;
   color: var(--text2);
   text-transform: uppercase;
   letter-spacing: .3px;
@@ -1838,6 +1849,13 @@ html, body {
 #cc-calc-btn:active { transform:scale(.98); }
 #cc-calc-btn:disabled { opacity:.5; cursor:not-allowed; }
 
+#cc-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
 #cc-error {
   background:rgba(248,81,73,.1); border:1px solid rgba(248,81,73,.4);
   border-radius:var(--radius); color:var(--danger); padding:8px 10px; font-size:12px;
@@ -1861,9 +1879,14 @@ html, body {
     overflow: auto;
   }
 
+  #top-nav {
+    min-height: 48px;
+    height: auto;
+  }
+
   #sidebar {
     position: relative;
-    top: 48px;
+    margin-top: 0;
     width: 100%;
     height: auto;
     max-height: 50vh;
@@ -1873,7 +1896,6 @@ html, body {
 
   #map {
     position: relative;
-    top: 48px;
     left: 0;
     width: 100%;
     height: 50vh;
@@ -1896,6 +1918,21 @@ html, body {
 
   .port-sort-bar {
     padding: 0 8px 6px;
+  }
+
+  .sort-btn {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+
+  .pd-close-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  .mode-btn {
+    min-height: 36px;
   }
 }
 
