@@ -4,6 +4,7 @@ import time
 from collections import defaultdict
 from congestion_engine import CongestionEngine, MONITORED_PORTS
 from vessel_finder import AFRICA_KEYWORDS, BAGGED_CARGO_TYPES
+import global_tracker
 
 
 def get_market_overview(engine: CongestionEngine) -> dict:
@@ -58,7 +59,11 @@ def get_market_overview(engine: CongestionEngine) -> dict:
 
 
 def get_africa_corridor(engine: CongestionEngine) -> dict:
-    """Analyze India ↔ East Africa trade corridor."""
+    """Analyze India ↔ East Africa trade corridor.
+
+    Searches both the 12-port AIS snapshots AND the global vessel tracker
+    (108K+ vessels) to capture ships in transit across the Indian Ocean.
+    """
     india_ports = ["INKAN", "INKAK", "INVTZ", "INNSA", "INMUN"]
     africa_ports = ["MGTNR", "MGTLE", "KEMBA", "TZDAR"]
 
@@ -68,8 +73,28 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
         "PARADIP", "TUTICORIN", "KOLKATA", "KOCHI",
     ]
 
+    seen_mmsi: set = set()
     corridor_vessels = []
 
+    def _add_vessel(mmsi, name, vtype, state, port_label, port_locode, dest, flag, lat, lon):
+        key = str(mmsi)
+        if key in seen_mmsi:
+            return
+        seen_mmsi.add(key)
+        corridor_vessels.append({
+            "mmsi": mmsi,
+            "name": name,
+            "type": vtype,
+            "state": state,
+            "port": port_label,
+            "port_locode": port_locode,
+            "destination": dest,
+            "flag": flag,
+            "lat": lat,
+            "lon": lon,
+        })
+
+    # ── Search monitored-port snapshots ─────────────────────────────────────
     for locode in india_ports + africa_ports:
         vessels = engine.get_vessels_snapshot(locode)
         port_def = MONITORED_PORTS.get(locode, {})
@@ -80,25 +105,50 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
 
             is_bagged_type = any(bt.lower() in vtype.lower() for bt in BAGGED_CARGO_TYPES)
             is_africa_dest = any(kw in dest for kw in AFRICA_KEYWORDS)
-
             is_india_dest = any(kw in dest for kw in india_keywords)
+
             if is_bagged_type and (
                 (locode in india_ports and is_africa_dest)
                 or (locode in africa_ports and is_india_dest)
-                or (locode in africa_ports and locode in india_ports)  # shouldn't happen but safe
             ):
-                corridor_vessels.append({
-                    "mmsi": v["mmsi"],
-                    "name": v.get("name"),
-                    "type": vtype,
-                    "state": v["state"],
-                    "port": port_def.get("name", locode),
-                    "port_locode": locode,
-                    "destination": v.get("destination"),
-                    "flag": v.get("country_iso"),
-                    "lat": v["lat"],
-                    "lon": v["lon"],
-                })
+                _add_vessel(
+                    v["mmsi"], v.get("name"), vtype, v["state"],
+                    port_def.get("name", locode), locode,
+                    v.get("destination"), v.get("country_iso"),
+                    v["lat"], v["lon"],
+                )
+
+    # ── Search global tracker (vessels in transit across Indian Ocean) ───────
+    for v in global_tracker._global_vessels.values():
+        lat = v.get("lat")
+        lon = v.get("lon")
+        if lat is None or lon is None:
+            continue
+
+        dest = (v.get("destination") or "").upper()
+        if dest in ("CLASS B", "0", "", "NONE"):
+            continue
+
+        vtype = (v.get("type_specific") or v.get("type") or "").strip()
+        is_bagged_type = any(bt.lower() in vtype.lower() for bt in BAGGED_CARGO_TYPES)
+        if not is_bagged_type:
+            continue
+
+        is_africa_dest = any(kw in dest for kw in AFRICA_KEYWORDS)
+        is_india_dest = any(kw in dest for kw in india_keywords)
+
+        # India area: bounding box roughly 5–30°N, 60–92°E
+        in_india_area = (5 <= lat <= 30) and (60 <= lon <= 92)
+        # East Africa / Indian Ocean: bounding box -30–12°N, 30–80°E
+        in_africa_area = (-30 <= lat <= 12) and (30 <= lon <= 80)
+
+        if (is_africa_dest and in_india_area) or (is_india_dest and in_africa_area):
+            _add_vessel(
+                v["mmsi"], v.get("name"), vtype, "AT SEA",
+                "Indian Ocean", "",
+                v.get("destination"), v.get("country_iso"),
+                lat, lon,
+            )
 
     return {
         "corridor": "India ↔ East Africa",
@@ -112,4 +162,5 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
             vtype: len([v for v in corridor_vessels if v["type"] == vtype])
             for vtype in set(v["type"] for v in corridor_vessels)
         })),
+        "data_note": f"Includes vessels at monitored ports and {len(global_tracker._global_vessels):,} globally tracked vessels",
     }

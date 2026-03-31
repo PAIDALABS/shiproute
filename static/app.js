@@ -1586,7 +1586,7 @@ let selectedWeatherPort = null;
   if (!inp || !dd) return;
 
   createPortAutocomplete(inp, dd, (port) => {
-    selectedWeatherPort = { locode: port.locode, name: port.name };
+    selectedWeatherPort = { locode: port.locode, name: port.name, lat: port.lat, lon: port.lon };
     inp.value = `${port.name} (${port.locode})`;
   });
 })();
@@ -1601,6 +1601,10 @@ document.getElementById('weather-port-btn')?.addEventListener('click', async () 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     renderPortWeather(data);
+    // Pan map to port
+    const lat = data.port?.lat ?? selectedWeatherPort.lat;
+    const lon = data.port?.lon ?? selectedWeatherPort.lon;
+    if (lat && lon) map.flyTo([lat, lon], 8, { duration: 1.2 });
   } catch (err) {
     el.innerHTML = `<div class="vessel-empty">Error: ${err.message}</div>`;
   }
