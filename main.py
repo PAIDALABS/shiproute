@@ -22,6 +22,7 @@ from voyage_planner import calculate_multi_leg
 from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track, AFRICA_KEYWORDS, AFRICA_FLAGS, BAGGED_CARGO_TYPES
 from weather import get_route_weather, get_port_weather
 from market_intel import get_market_overview, get_africa_corridor
+from global_tracker import get_all_tracked_vessels, get_vessels_heading_to, run_global_tracker
 
 
 # ── Database connection ───────────────────────────────────────────────────────
@@ -43,12 +44,14 @@ async def lifespan(app):
     task = asyncio.create_task(run_ais_stream(engine))
     snapshot_task = asyncio.create_task(_snapshot_loop())
     alert_task = asyncio.create_task(_alert_loop())
+    global_task = asyncio.create_task(run_global_tracker())
     yield
     engine.save_state()
     task.cancel()
     snapshot_task.cancel()
     alert_task.cancel()
-    await asyncio.gather(task, snapshot_task, alert_task, return_exceptions=True)
+    global_task.cancel()
+    await asyncio.gather(task, snapshot_task, alert_task, global_task, return_exceptions=True)
 
 app = FastAPI(title="ShipRoute", lifespan=lifespan)
 
@@ -480,12 +483,50 @@ def get_fleet_overview():
                 })
         inbound[locode] = {"count": len(incoming), "vessels": incoming}
 
+    # Enhance inbound with global tracking data
+    for locode, port_def in MONITORED_PORTS.items():
+        port_name = port_def["name"].split("(")[0].strip()
+        global_inbound = get_vessels_heading_to(port_name, locode)
+        # Merge with existing inbound (avoid duplicates by MMSI)
+        existing_mmsis = {v["mmsi"] for v in inbound[locode]["vessels"]}
+        for v in global_inbound:
+            if v["mmsi"] not in existing_mmsis:
+                inbound[locode]["vessels"].append({
+                    "mmsi": v["mmsi"], "name": v.get("name"),
+                    "type": v.get("type_specific") or v.get("type"),
+                    "from_port": "En Route", "from_locode": "",
+                    "state": "EN_ROUTE", "speed": v.get("speed", 0),
+                    "lat": v.get("lat"), "lon": v.get("lon"),
+                    "destination": v.get("destination"),
+                    "eta_utc": v.get("eta_utc"),
+                })
+        inbound[locode]["count"] = len(inbound[locode]["vessels"])
+
     return {
         "vessels": all_vessels,
         "total": len(all_vessels),
         "ports": port_stats,
         "inbound": inbound,
         "ports_monitored": len(MONITORED_PORTS),
+    }
+
+
+@app.get("/api/fleet/global")
+def get_global_fleet():
+    """All tracked vessels globally with live positions."""
+    return get_all_tracked_vessels()
+
+@app.get("/api/fleet/inbound/{locode}")
+def get_inbound_vessels(locode: str):
+    """Vessels heading to a specific port from anywhere in the world."""
+    port_def = MONITORED_PORTS.get(locode.upper())
+    port_name = port_def["name"].split("(")[0].strip() if port_def else locode
+    vessels = get_vessels_heading_to(port_name, locode.upper())
+    return {
+        "locode": locode.upper(),
+        "port_name": port_name,
+        "inbound_count": len(vessels),
+        "vessels": vessels,
     }
 
 
