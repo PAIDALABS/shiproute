@@ -19,6 +19,7 @@
       <span class="nav-brand-title">ShipRoute</span>
     </div>
     <div id="mode-toggle">
+      <button class="mode-btn mode-btn-primary" id="btn-command-mode" onclick="switchMode('command')">Command Center</button>
       <button class="mode-btn" id="btn-voyage-mode" onclick="switchMode('voyage')">Voyage</button>
       <button class="mode-btn active" id="btn-portwatch-mode" onclick="switchMode('portwatch')">Port Watch</button>
       <button class="mode-btn" id="btn-finder-mode" onclick="switchMode('finder')">Vessel Finder</button>
@@ -206,6 +207,69 @@
       <div id="market-loading" class="vessel-empty">Loading market data...</div>
       <div id="market-content"></div>
     </div><!-- /#market-mode -->
+
+    <div id="command-mode" class="mode-panel hidden">
+      <div><div class="brand-title">Command Center</div><div class="brand-sub">Hire + Plan Decision Hub</div></div>
+
+      <div class="cc-section">
+        <div class="waypoint-block">
+          <div class="waypoint-label"><span class="dot dot-origin"></span> Origin Port</div>
+          <div class="autocomplete-wrap">
+            <input class="inp" type="text" id="cc-origin-search" placeholder="Search origin port..." autocomplete="off" />
+            <div class="dropdown" id="cc-origin-dropdown"></div>
+          </div>
+        </div>
+        <div id="cc-origin-intel" class="cc-port-intel"></div>
+      </div>
+
+      <div class="cc-section">
+        <div class="waypoint-block">
+          <div class="waypoint-label"><span class="dot dot-dest"></span> Destination Port</div>
+          <div class="autocomplete-wrap">
+            <input class="inp" type="text" id="cc-dest-search" placeholder="Search destination port..." autocomplete="off" />
+            <div class="dropdown" id="cc-dest-dropdown"></div>
+          </div>
+        </div>
+        <div id="cc-dest-intel" class="cc-port-intel"></div>
+      </div>
+
+      <div class="cc-section">
+        <div class="speed-row">
+          <label class="speed-label">Speed</label>
+          <input class="inp speed-inp" type="number" id="cc-speed" value="14" min="1" max="50" step="0.5" />
+          <span class="speed-unit">kn</span>
+          <label class="speed-label">Fuel</label>
+          <input class="inp speed-inp" type="number" id="cc-fuel-cons" value="22" min="1" max="200" step="1" />
+          <span class="speed-unit">MT/d</span>
+        </div>
+        <button id="cc-calc-btn" class="calc-btn">Calculate Voyage</button>
+      </div>
+
+      <div id="cc-loading" class="hidden" style="display:flex;align-items:center;gap:8px;padding:8px 0"><div class="spinner"></div>Calculating...</div>
+      <div id="cc-error" class="hidden"></div>
+
+      <div id="cc-route-summary" class="hidden"></div>
+
+      <div id="cc-vessels-section" class="hidden">
+        <div class="cc-section-header">
+          <span>Vessels at Origin</span>
+          <span id="cc-vessels-count" class="cc-count-badge"></span>
+        </div>
+        <div id="cc-vessels-list"></div>
+      </div>
+
+      <div id="cc-dest-detail" class="hidden"></div>
+
+      <div id="cc-weather-section" class="hidden">
+        <div class="cc-section-header">Route Weather</div>
+        <div id="cc-weather-content"></div>
+      </div>
+
+      <div id="cc-market-section" class="hidden">
+        <div class="cc-section-header">Market Snapshot</div>
+        <div id="cc-market-content"></div>
+      </div>
+    </div>
 
   </aside>
 

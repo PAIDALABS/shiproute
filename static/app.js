@@ -25,6 +25,15 @@ let finderPort   = null;
 let finderMarkers = L.featureGroup();
 let finderTrackLayer = null;
 
+// ── Command Center state ─────────────────────────────────────────────────
+let ccOriginPort = null;
+let ccDestPort = null;
+let ccRouteData = null;
+let ccRouteLayer = null;
+let ccVesselMarkers = L.featureGroup();
+let ccWeatherMarkers = L.featureGroup();
+let ccPortMarkers = L.featureGroup();
+
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -544,6 +553,7 @@ function switchMode(mode) {
   finderEl.classList.add('hidden');
   weatherEl.classList.add('hidden');
   marketEl.classList.add('hidden');
+  $('command-mode')?.classList.add('hidden');
 
   // Deactivate all buttons
   btnVoyage.classList.remove('active');
@@ -551,6 +561,7 @@ function switchMode(mode) {
   btnFinder.classList.remove('active');
   btnWeather.classList.remove('active');
   btnMarket.classList.remove('active');
+  $('btn-command-mode')?.classList.remove('active');
 
   // Clear map overlays
   portMarkers.clearLayers();
@@ -561,6 +572,10 @@ function switchMode(mode) {
   closePortDetail();
   if (routeLayer)   { routeLayer.remove();   routeLayer = null; }
   if (markersLayer) { markersLayer.remove(); markersLayer = null; }
+  if (ccRouteLayer) { ccRouteLayer.remove(); ccRouteLayer = null; }
+  ccVesselMarkers.clearLayers();
+  ccWeatherMarkers.clearLayers();
+  ccPortMarkers.clearLayers();
 
   if (mode === 'voyage') {
     voyageEl.classList.remove('hidden');
@@ -589,6 +604,13 @@ function switchMode(mode) {
     marketEl.classList.remove('hidden');
     btnMarket.classList.add('active');
     loadMarketData();
+  } else if (mode === 'command') {
+    $('command-mode').classList.remove('hidden');
+    $('btn-command-mode').classList.add('active');
+    ccVesselMarkers.addTo(map);
+    ccWeatherMarkers.addTo(map);
+    ccPortMarkers.addTo(map);
+    if (ccRouteLayer) ccRouteLayer.addTo(map);
   }
 }
 
@@ -1844,6 +1866,315 @@ document.querySelectorAll('.onboard-btn').forEach(btn => {
     } catch { /* ignore */ }
   });
 });
+
+// ── Command Center ───────────────────────────────────────────────────────
+(function initCommandCenter() {
+  const originInput = $('cc-origin-search');
+  const originDD = $('cc-origin-dropdown');
+  const destInput = $('cc-dest-search');
+  const destDD = $('cc-dest-dropdown');
+  if (!originInput || !destInput) return;
+
+  createPortAutocomplete(originInput, originDD, (port) => {
+    ccOriginPort = { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode };
+    originInput.value = `${port.name} (${port.locode})`;
+    fetchCCPortQuickIntel(port.locode, 'cc-origin-intel');
+  }, { onClear: () => { ccOriginPort = null; $('cc-origin-intel').innerHTML = ''; } });
+
+  createPortAutocomplete(destInput, destDD, (port) => {
+    ccDestPort = { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode };
+    destInput.value = `${port.name} (${port.locode})`;
+    fetchCCPortQuickIntel(port.locode, 'cc-dest-intel');
+  }, { onClear: () => { ccDestPort = null; $('cc-dest-intel').innerHTML = ''; } });
+
+  $('cc-calc-btn')?.addEventListener('click', calculateCommandCenter);
+})();
+
+async function fetchCCPortQuickIntel(locode, targetId) {
+  const el = $(targetId);
+  if (!el) return;
+  el.innerHTML = '<div class="cc-loading-sm"><div class="spinner"></div></div>';
+  try {
+    const res = await fetch(`/api/port-watch/${encodeURIComponent(locode)}/arrival-advisory`);
+    const d = await res.json();
+    if (!d.monitored) { el.innerHTML = '<div class="cc-muted">Not in live monitoring</div>'; return; }
+    const col = levelColor(d.severity);
+    el.innerHTML = `<div class="cc-port-quick" style="border-left:3px solid ${col}">
+      <div class="cc-quick-row"><span>${severityIcon(d.severity)} ${d.severity}</span><span style="color:${col};font-weight:700">${d.congestion_score}</span></div>
+      <div class="cc-quick-row"><span>${d.current_queue} in queue</span><span>${d.estimated_wait_hours > 0 ? d.estimated_wait_hours + 'h wait' : 'No wait'}</span></div>
+    </div>`;
+  } catch { el.innerHTML = ''; }
+}
+
+async function calculateCommandCenter() {
+  if (!ccOriginPort || !ccDestPort) { showCCError('Select both origin and destination'); return; }
+  hideCCError();
+  const btn = $('cc-calc-btn');
+  btn.disabled = true;
+  $('cc-loading').classList.remove('hidden');
+
+  // Clear previous
+  ['cc-route-summary','cc-vessels-section','cc-dest-detail','cc-weather-section','cc-market-section'].forEach(id => $(id)?.classList.add('hidden'));
+  if (ccRouteLayer) { ccRouteLayer.remove(); ccRouteLayer = null; }
+  ccVesselMarkers.clearLayers(); ccWeatherMarkers.clearLayers(); ccPortMarkers.clearLayers();
+
+  const speed = parseFloat($('cc-speed')?.value) || 14;
+  const fuelCons = parseFloat($('cc-fuel-cons')?.value) || 22;
+
+  try {
+    // BATCH 1 — parallel
+    const [routeRes, vesselsRes, origRes, destRes, mktRes, corrRes] = await Promise.all([
+      fetch('/api/route/multi', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ waypoints: [
+          { lat: ccOriginPort.lat, lon: ccOriginPort.lon, name: ccOriginPort.name },
+          { lat: ccDestPort.lat, lon: ccDestPort.lon, name: ccDestPort.name },
+        ], speed_knots: speed }),
+      }),
+      fetch(`/api/vessels/search?locode=${encodeURIComponent(ccOriginPort.locode)}`),
+      fetch(`/api/port-watch/${encodeURIComponent(ccOriginPort.locode)}/arrival-advisory`),
+      fetch(`/api/port-watch/${encodeURIComponent(ccDestPort.locode)}/arrival-advisory`),
+      fetch('/api/market/overview'),
+      fetch('/api/market/africa-corridor'),
+    ]);
+
+    const route = routeRes.ok ? await routeRes.json() : null;
+    const vessels = vesselsRes.ok ? await vesselsRes.json() : null;
+    const origCong = origRes.ok ? await origRes.json() : null;
+    const destCong = destRes.ok ? await destRes.json() : null;
+    const market = mktRes.ok ? await mktRes.json() : null;
+    const corridor = corrRes.ok ? await corrRes.json() : null;
+
+    if (!route || route.error) throw new Error(route?.error || 'Route calculation failed');
+    ccRouteData = route;
+
+    $('cc-loading').classList.add('hidden');
+    btn.disabled = false;
+
+    // RENDER BATCH 1
+    renderCCRoute(route, speed, fuelCons);
+    renderCCDestIntel(destCong);
+    renderCCVessels(vessels);
+    renderCCMarket(market, corridor);
+    renderCCRouteOnMap(route);
+    renderCCPortsOnMap(origCong, destCong);
+    renderCCVesselsOnMap(vessels);
+
+    // BATCH 2 — background weather
+    $('cc-weather-section').classList.remove('hidden');
+    $('cc-weather-content').innerHTML = '<div class="cc-loading-sm"><div class="spinner"></div> Loading weather...</div>';
+    try {
+      const geoJSON = { type: 'FeatureCollection', features: route.legs.map(l => l.route) };
+      const wxRes = await fetch('/api/weather/route', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ route_geojson: geoJSON, speed_knots: speed, departure_time: new Date().toISOString() }),
+      });
+      if (wxRes.ok) {
+        const wx = await wxRes.json();
+        renderCCWeather(wx);
+        renderCCWeatherOnMap(wx);
+      } else {
+        $('cc-weather-content').innerHTML = '<div class="cc-muted">Weather unavailable</div>';
+      }
+    } catch { $('cc-weather-content').innerHTML = '<div class="cc-muted">Weather unavailable</div>'; }
+
+  } catch (err) {
+    $('cc-loading').classList.add('hidden');
+    btn.disabled = false;
+    showCCError(err.message || 'Calculation failed');
+  }
+}
+
+function showCCError(msg) { const e = $('cc-error'); if(e){e.textContent=msg;e.classList.remove('hidden');} }
+function hideCCError() { $('cc-error')?.classList.add('hidden'); }
+
+// ── Command Center: Sidebar Render Functions ─────────────────────────────
+function renderCCRoute(data, speed, fuelCons) {
+  const el = $('cc-route-summary'); el.classList.remove('hidden');
+  const t = data.totals;
+  const days = t.duration_hours / 24;
+  const fuelMT = Math.round(days * fuelCons);
+  const fuelCost = Math.round(fuelMT * 600);
+  el.innerHTML = `<div class="cc-section-header">Route Summary</div>
+    <div class="cc-route-card">
+      <div class="cc-route-label">${escHtml(data.legs[0].origin.name)} &rarr; ${escHtml(data.legs[data.legs.length-1].destination.name)}</div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value">${Number(t.distance_nmi).toLocaleString()}</div><div class="stat-label">NMI</div></div>
+        <div class="stat-card"><div class="stat-value">${formatDuration(t.duration_hours)}</div><div class="stat-label">at ${speed} kn</div></div>
+        <div class="stat-card"><div class="stat-value">${fuelMT} MT</div><div class="stat-label">Fuel</div></div>
+        <div class="stat-card"><div class="stat-value">$${(fuelCost/1000).toFixed(0)}K</div><div class="stat-label">Cost</div></div>
+      </div>
+    </div>`;
+}
+
+function renderCCDestIntel(adv) {
+  const el = $('cc-dest-detail');
+  if (!adv || !adv.monitored) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const col = levelColor(adv.severity);
+  el.innerHTML = `<div class="cc-section-header">Destination Intel</div>
+    <div class="cc-dest-card" style="border-left:3px solid ${col}">
+      <div class="cc-quick-row"><span>Expected wait</span><span style="font-weight:700;color:${col}">${adv.estimated_wait_hours > 0 ? adv.estimated_wait_hours+'h' : 'Minimal'}</span></div>
+      <div class="cc-quick-row"><span>Queue</span><span>${adv.current_queue} anchored · ${adv.berths_occupied} berthed</span></div>
+      <div class="cc-quick-row"><span>Score</span><span>${severityIcon(adv.severity)} ${adv.congestion_score} ${adv.severity}</span></div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">${escHtml(adv.recommendation)}</div>
+    </div>`;
+}
+
+function renderCCVessels(data) {
+  const section = $('cc-vessels-section');
+  const list = $('cc-vessels-list');
+  const count = $('cc-vessels-count');
+  if (!data?.vessels?.length) {
+    section.classList.remove('hidden');
+    count.textContent = '0';
+    list.innerHTML = '<div class="cc-muted">No vessels found near origin</div>';
+    return;
+  }
+  section.classList.remove('hidden');
+  count.textContent = data.vessels.length;
+  const top = data.vessels.slice(0, 10);
+  list.innerHTML = top.map(v => {
+    const s = v.availability?.score || 0;
+    const dots = '\u25CF'.repeat(Math.round(s*5)) + '\u25CB'.repeat(5-Math.round(s*5));
+    const cls = s >= 0.6 ? 'good' : s >= 0.3 ? 'warn' : '';
+    return `<div class="cc-vessel-card" data-mmsi="${v.mmsi}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:600;font-size:12px">${escHtml(v.name || String(v.mmsi))}</span>
+        <span class="${cls}" style="font-size:11px;letter-spacing:1px">${dots}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2)">${escHtml(v.type || 'Unknown')} · ${(v.distance||0).toFixed(1)} nm${v.africa_trade ? ' · <span style="color:#ff9800">Africa</span>' : ''}</div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.cc-vessel-card').forEach(el => {
+    el.addEventListener('click', () => {
+      const mmsi = parseInt(el.dataset.mmsi, 10);
+      if (mmsi) loadVesselDetail(mmsi);
+    });
+  });
+}
+
+function renderCCWeather(wx) {
+  const el = $('cc-weather-content');
+  const counts = { LOW:0, MODERATE:0, HIGH:0, SEVERE:0 };
+  (wx.weather_points||[]).forEach(p => { if (counts[p.risk_level] !== undefined) counts[p.risk_level]++; });
+  let html = `<div style="text-align:center;padding:6px;background:var(--bg3);border-radius:6px;margin-bottom:6px">
+    <div style="font-size:14px;font-weight:700;color:${wx.overall_risk_color}">${wx.overall_risk} RISK</div>
+  </div>
+  <div class="intel-grid">
+    <div class="intel-card"><div class="intel-val good">${counts.LOW}</div><div class="intel-label">Low</div></div>
+    <div class="intel-card"><div class="intel-val warn">${counts.MODERATE}</div><div class="intel-label">Mod</div></div>
+    <div class="intel-card"><div class="intel-val hot">${counts.HIGH+counts.SEVERE}</div><div class="intel-label">High+</div></div>
+  </div>`;
+  if (wx.worst_point?.weather) {
+    const w = wx.worst_point;
+    html += `<div style="font-size:11px;color:var(--text2);margin-top:4px">Worst: ${w.weather.wave_height_m?.toFixed(1)||'?'}m waves at ${w.distance_nmi} nmi</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderCCMarket(overview, corridor) {
+  const section = $('cc-market-section');
+  const el = $('cc-market-content');
+  if (!overview && !corridor) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  let html = '';
+  if (overview?.summary) {
+    const s = overview.summary;
+    html += `<div class="intel-grid">
+      <div class="intel-card"><div class="intel-val">${s.total_vessels_all_ports}</div><div class="intel-label">Fleet</div></div>
+      <div class="intel-card"><div class="intel-val warn">${s.total_africa_trade}</div><div class="intel-label">Africa</div></div>
+      <div class="intel-card"><div class="intel-val">${s.ports_monitored}</div><div class="intel-label">Ports</div></div>
+    </div>`;
+  }
+  if (corridor?.total_vessels > 0) {
+    html += `<div style="font-size:11px;color:#ff9800;margin-top:4px">${corridor.total_vessels} vessels on India-Africa corridor</div>`;
+  }
+  el.innerHTML = html;
+}
+
+// ── Command Center: Map Render Functions ─────────────────────────────────
+function renderCCRouteOnMap(data) {
+  if (ccRouteLayer) { ccRouteLayer.remove(); ccRouteLayer = null; }
+  const group = L.featureGroup();
+  const colors = ['#2196f3','#4caf50','#ff9800','#9c27b0','#00bcd4'];
+  data.legs.forEach((leg, i) => {
+    const col = colors[i % colors.length];
+    const coords = leg.route.geometry.coordinates;
+    const cumD = buildCumDist(coords);
+    const totalNmi = cumD[cumD.length - 1];
+    const tip = L.tooltip({ sticky:true, className:'route-tooltip', offset:[14,0] });
+    const gj = L.geoJSON(leg.route, { style: { color:col, weight:4, opacity:0.85 } });
+    gj.eachLayer(layer => {
+      layer.on('mousemove', e => {
+        const elapsed = distAlongRoute(e.latlng, coords, cumD);
+        const remain = Math.max(0, totalNmi - elapsed);
+        const spd = parseFloat($('cc-speed')?.value) || 14;
+        tip.setLatLng(e.latlng).setContent(
+          `<div class="rt-row"><span class="rt-label">From start</span><span class="rt-val">${elapsed.toFixed(0)} nmi</span></div>` +
+          `<div class="rt-row"><span class="rt-label">Remaining</span><span class="rt-val">${remain.toFixed(0)} nmi</span></div>` +
+          `<div class="rt-row"><span class="rt-label">ETA</span><span class="rt-val">${formatDuration(remain/spd)}</span></div>`
+        ).openOn(map);
+      });
+      layer.on('mouseout', () => map.closeTooltip(tip));
+    });
+    gj.addTo(group);
+    const oIcon = makeIcon(i===0?'#26a69a':col, String(i+1));
+    L.marker([leg.origin.lat, leg.origin.lon], {icon:oIcon}).addTo(group);
+    if (i === data.legs.length-1) {
+      L.marker([leg.destination.lat, leg.destination.lon], {icon:makeIcon('#ef5350',String(i+2))}).addTo(group);
+    }
+  });
+  group.addTo(map);
+  ccRouteLayer = group;
+  map.fitBounds(group.getBounds(), {padding:[40,40]});
+}
+
+function renderCCPortsOnMap(origCong, destCong) {
+  ccPortMarkers.clearLayers();
+  [[ccOriginPort, origCong], [ccDestPort, destCong]].forEach(([port, cong]) => {
+    if (!port || !cong?.monitored) return;
+    const col = levelColor(cong.severity);
+    const c = L.circleMarker([port.lat, port.lon], {
+      radius:18, color:col, weight:3, opacity:0.8, fillColor:col, fillOpacity:0.2,
+    });
+    c.bindTooltip(`${escHtml(port.name)}<br>${severityIcon(cong.severity)} ${cong.severity} (${cong.congestion_score})`, {className:'port-tooltip'});
+    c.on('click', () => openLivePortDetail(port.locode));
+    ccPortMarkers.addLayer(c);
+  });
+  if (ccPortMarkers.getLayers().length) ccPortMarkers.addTo(map);
+}
+
+function renderCCVesselsOnMap(data) {
+  ccVesselMarkers.clearLayers();
+  if (!data?.vessels) return;
+  data.vessels.forEach(v => {
+    if (v.lat == null || v.lon == null) return;
+    const s = v.availability?.score || 0;
+    const col = s >= 0.6 ? '#4caf50' : s >= 0.3 ? '#ff9800' : '#8b949e';
+    const m = L.circleMarker([v.lat, v.lon], {
+      radius:6, color:'#fff', weight:1.5, fillColor:col, fillOpacity:0.9,
+    });
+    m.bindTooltip(`<strong>${escHtml(v.name||String(v.mmsi))}</strong><br>${escHtml(v.type||'')} · ${v.speed||0} kts`, {sticky:true, className:'port-tooltip'});
+    m.on('click', () => loadVesselDetail(v.mmsi));
+    ccVesselMarkers.addLayer(m);
+  });
+  if (ccVesselMarkers.getLayers().length) ccVesselMarkers.addTo(map);
+}
+
+function renderCCWeatherOnMap(wx) {
+  ccWeatherMarkers.clearLayers();
+  (wx.weather_points||[]).forEach(p => {
+    if (!p.lat || !p.lon) return;
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius:5, color:'#fff', weight:1, fillColor:p.risk_color||'#8b949e', fillOpacity:0.85,
+    });
+    const w = p.weather||{};
+    m.bindTooltip(`<strong>${p.distance_nmi} nmi</strong> — ${p.risk_level}<br>Waves: ${w.wave_height_m?.toFixed(1)||'?'}m · Wind: ${Math.round(w.wind_speed_kts||0)} kts`, {sticky:true, className:'port-tooltip'});
+    ccWeatherMarkers.addLayer(m);
+  });
+  if (ccWeatherMarkers.getLayers().length) ccWeatherMarkers.addTo(map);
+}
 
 // ── Boot into Port Watch mode ────────────────────────────────────────────
 switchMode('portwatch');
