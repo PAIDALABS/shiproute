@@ -21,8 +21,9 @@ from cargo_flow import compute_cargo_flow, compute_all_ports_flow, save_daily_sn
 from voyage_planner import calculate_multi_leg
 from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track, AFRICA_KEYWORDS, AFRICA_FLAGS, BAGGED_CARGO_TYPES
 from weather import get_route_weather, get_port_weather
-from market_intel import get_market_overview, get_africa_corridor
+from market_intel import get_market_overview, get_africa_corridor, get_global_market_overview
 from global_tracker import get_all_tracked_vessels, get_vessels_heading_to, run_global_tracker
+from port_database import init_port_database, run_port_database_refresh
 
 
 # ── Database connection ───────────────────────────────────────────────────────
@@ -41,17 +42,20 @@ def get_db():
 @asynccontextmanager
 async def lifespan(app):
     engine.load_state()
+    await init_port_database()
     task = asyncio.create_task(run_ais_stream(engine))
     snapshot_task = asyncio.create_task(_snapshot_loop())
     alert_task = asyncio.create_task(_alert_loop())
     global_task = asyncio.create_task(run_global_tracker())
+    port_refresh_task = asyncio.create_task(run_port_database_refresh())
     yield
     engine.save_state()
     task.cancel()
     snapshot_task.cancel()
     alert_task.cancel()
     global_task.cancel()
-    await asyncio.gather(task, snapshot_task, alert_task, global_task, return_exceptions=True)
+    port_refresh_task.cancel()
+    await asyncio.gather(task, snapshot_task, alert_task, global_task, port_refresh_task, return_exceptions=True)
 
 app = FastAPI(title="ShipRoute", lifespan=lifespan)
 
@@ -326,6 +330,17 @@ def api_market_overview():
 def api_africa_corridor():
     """India ↔ East Africa trade corridor analysis."""
     return get_africa_corridor(engine)
+
+@app.get("/api/market/global")
+def api_global_market(top: int = Query(default=100, le=500)):
+    """Global port rankings by inbound vessel count across 86K tracked vessels."""
+    return get_global_market_overview(top_n=top)
+
+@app.get("/api/ports/database/status")
+def api_port_db_status():
+    """Port database download status."""
+    from port_database import get_database_status
+    return get_database_status()
 
 
 # ── Arrival Advisory ──────────────────────────────────────────────────────────

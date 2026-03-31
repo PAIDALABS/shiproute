@@ -1,7 +1,7 @@
 """Market intelligence — cargo trends, Africa corridor, port comparison."""
 
 import time
-from collections import defaultdict
+from collections import defaultdict, Counter
 from congestion_engine import CongestionEngine, MONITORED_PORTS
 from vessel_finder import AFRICA_KEYWORDS, BAGGED_CARGO_TYPES
 import global_tracker
@@ -163,4 +163,80 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
             for vtype in set(v["type"] for v in corridor_vessels)
         })),
         "data_note": f"Includes vessels at monitored ports and {len(global_tracker._global_vessels):,} globally tracked vessels",
+    }
+
+
+def get_global_market_overview(top_n: int = 100) -> dict:
+    """Global port rankings by inbound vessel count from 86K vessel tracker.
+
+    Uses destination field from all globally tracked vessels to rank ports
+    by traffic. Resolves destination strings to structured port records
+    via port_database.
+    """
+    from port_database import resolve_destination, JUNK_DESTINATIONS
+
+    vessels = list(global_tracker._global_vessels.values())
+    vessels_with_pos = [v for v in vessels if v.get("lat") is not None]
+
+    dest_counts: dict[str, int] = {}
+    dest_to_port: dict[str, dict] = {}
+    dest_type_counts: dict[str, Counter] = {}
+    vessels_with_dest = 0
+
+    for v in vessels_with_pos:
+        raw_dest = (v.get("destination") or "").strip().upper()
+        if not raw_dest or raw_dest in JUNK_DESTINATIONS:
+            continue
+        # Skip obviously junk multi-word non-port strings
+        if any(raw_dest.startswith(j) for j in ("FOR ", "WAIT", "CLASS")):
+            continue
+
+        vessels_with_dest += 1
+        port = resolve_destination(raw_dest)
+        key = port["unlocode"] if port else raw_dest
+
+        dest_counts[key] = dest_counts.get(key, 0) + 1
+        if port and key not in dest_to_port:
+            dest_to_port[key] = port
+        if key not in dest_type_counts:
+            dest_type_counts[key] = Counter()
+        vtype = v.get("type_specific") or v.get("type") or "Unknown"
+        dest_type_counts[key][vtype] += 1
+
+    # Build sorted port rows
+    top_items = sorted(dest_counts.items(), key=lambda x: -x[1])[:top_n]
+    port_rows = []
+    for key, count in top_items:
+        p = dest_to_port.get(key)
+        types = dest_type_counts.get(key, Counter())
+        port_rows.append({
+            "key": key,
+            "name": p["port_name"] if p else key,
+            "country": p["country_name"] if p else "",
+            "country_iso": p["country_iso"] if p else "",
+            "unlocode": p["unlocode"] if p else "",
+            "lat": p["lat"] if p else None,
+            "lon": p["lon"] if p else None,
+            "inbound_vessels": count,
+            "top_types": dict(types.most_common(3)),
+            "resolved": p is not None,
+        })
+
+    # Overall type distribution
+    type_counts = Counter(
+        v.get("type_specific") or v.get("type") or "Unknown"
+        for v in vessels_with_pos
+    )
+
+    return {
+        "ports": port_rows,
+        "summary": {
+            "total_in_database": len(vessels),
+            "vessels_with_position": len(vessels_with_pos),
+            "vessels_with_destination": vessels_with_dest,
+            "active_destinations": len(dest_counts),
+            "ports_shown": len(port_rows),
+        },
+        "vessel_types": dict(type_counts.most_common(10)),
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

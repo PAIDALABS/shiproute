@@ -1739,6 +1739,8 @@ function renderRouteWeather(data) {
 
 
 // ── Market Intel Mode ────────────────────────────────────────────────────────
+let _marketGlobalData = null; // cached for filter
+
 async function loadMarketData() {
   const loading = document.getElementById('market-loading');
   const content = document.getElementById('market-content');
@@ -1747,53 +1749,62 @@ async function loadMarketData() {
   content.innerHTML = '';
 
   try {
-    const [overviewRes, corridorRes] = await Promise.all([
+    const [overviewRes, corridorRes, globalRes] = await Promise.all([
       fetch('/api/market/overview'),
       fetch('/api/market/africa-corridor'),
+      fetch('/api/market/global?top=150'),
     ]);
 
     const overview = overviewRes.ok ? await overviewRes.json() : null;
     const corridor = corridorRes.ok ? await corridorRes.json() : null;
+    _marketGlobalData = globalRes.ok ? await globalRes.json() : null;
 
     loading.classList.add('hidden');
-    renderMarketIntel(overview, corridor);
+    renderMarketIntel(overview, corridor, _marketGlobalData);
   } catch (err) {
     loading.textContent = `Error: ${err.message}`;
   }
 }
 
-function renderMarketIntel(overview, corridor) {
+// Filter handler — re-renders port table without new API call
+document.getElementById('market-port-search')?.addEventListener('input', function() {
+  if (!_marketGlobalData) return;
+  const q = this.value.trim().toLowerCase();
+  renderGlobalPortTable(_marketGlobalData, q);
+});
+
+function renderMarketIntel(overview, corridor, globalData) {
   const content = document.getElementById('market-content');
   let html = '';
+
+  // ── Global fleet summary (top of page) ───────────────────────────────────
+  if (globalData) {
+    const s = globalData.summary;
+    const pct = s.vessels_with_position > 0
+      ? Math.round((s.vessels_with_destination / s.vessels_with_position) * 100) : 0;
+    html += `<div class="intel-section">
+      <div class="intel-section-title">Global Fleet</div>
+      <div class="intel-grid">
+        <div class="intel-card"><div class="intel-val">${(s.total_in_database||0).toLocaleString()}</div><div class="intel-label">Vessels in DB</div></div>
+        <div class="intel-card"><div class="intel-val">${(s.vessels_with_position||0).toLocaleString()}</div><div class="intel-label">With Position</div></div>
+        <div class="intel-card"><div class="intel-val warn">${(s.vessels_with_destination||0).toLocaleString()}</div><div class="intel-label">With Destination</div></div>
+        <div class="intel-card"><div class="intel-val">${s.active_destinations||0}</div><div class="intel-label">Active Ports</div></div>
+      </div>
+    </div>`;
+  }
 
   if (overview) {
     const s = overview.summary;
 
-    // Summary cards
+    // Monitored-port summary (secondary)
     html += `<div class="intel-section">
-      <div class="intel-section-title">Market Overview</div>
+      <div class="intel-section-title">Monitored Ports (12)</div>
       <div class="intel-grid">
-        <div class="intel-card"><div class="intel-val">${s.total_vessels_all_ports}</div><div class="intel-label">Total Vessels</div></div>
+        <div class="intel-card"><div class="intel-val">${s.total_vessels_all_ports}</div><div class="intel-label">AIS Vessels</div></div>
         <div class="intel-card"><div class="intel-val warn">${s.total_africa_trade}</div><div class="intel-label">Africa Trade</div></div>
-        <div class="intel-card"><div class="intel-val">${s.ports_monitored}</div><div class="intel-label">Ports</div></div>
+        <div class="intel-card"><div class="intel-val">${overview.summary.busiest_port?.split(' ')[0] || 'N/A'}</div><div class="intel-label">Busiest</div></div>
       </div>
     </div>`;
-
-    // Port comparison heatmap
-    html += `<div class="intel-section">
-      <div class="intel-section-title">Port Activity Comparison</div>`;
-
-    const maxV = Math.max(...overview.ports.map(p => p.total_vessels), 1);
-    overview.ports.forEach(p => {
-      const pct = Math.round((p.total_vessels / maxV) * 100);
-      const severityCol = {'SEVERE': '#ef5350', 'HIGH': '#ff9800', 'MODERATE': '#ffeb3b', 'LOW': '#4caf50'}[p.severity] || '#4caf50';
-      html += `<div class="intel-bar-row">
-        <span class="intel-bar-label" title="${p.name}">${severityIcon(p.severity || 'LOW')} ${p.name.substring(0, 10)}</span>
-        <div class="intel-bar-track"><div class="intel-bar-fill" style="width:${pct}%;background:${severityCol}"></div></div>
-        <span class="intel-bar-val">${p.total_vessels} (${p.congestion_score})</span>
-      </div>`;
-    });
-    html += '</div>';
 
     // Vessel type distribution across all ports
     html += `<div class="intel-section">
@@ -1849,6 +1860,77 @@ function renderMarketIntel(overview, corridor) {
   }
 
   content.innerHTML = html;
+
+  // Render global port table below (uses its own container div)
+  if (globalData) renderGlobalPortTable(globalData, '');
+}
+
+function renderGlobalPortTable(globalData, filterQ) {
+  const content = document.getElementById('market-content');
+
+  // Remove any existing global-port-table div, re-append
+  let tableDiv = document.getElementById('global-port-table');
+  if (!tableDiv) {
+    tableDiv = document.createElement('div');
+    tableDiv.id = 'global-port-table';
+    content.appendChild(tableDiv);
+  }
+
+  const ports = globalData.ports || [];
+  const q = (filterQ || '').toLowerCase();
+  const filtered = q
+    ? ports.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        (p.country || '').toLowerCase().includes(q) ||
+        (p.unlocode || '').toLowerCase().includes(q) ||
+        p.key.toLowerCase().includes(q)
+      )
+    : ports;
+
+  const maxCount = filtered[0]?.inbound_vessels || 1;
+
+  let html = `<div class="intel-section">
+    <div class="intel-section-title">Top Ports by Inbound Vessels${q ? ` — "${escHtml(q)}"` : ''} (${filtered.length})</div>
+    <table class="turnaround-table" style="width:100%">
+      <thead><tr>
+        <th>#</th>
+        <th>Port</th>
+        <th>Country</th>
+        <th style="text-align:right">Inbound</th>
+        <th style="text-align:center">Bar</th>
+      </tr></thead>
+      <tbody>`;
+
+  filtered.slice(0, 150).forEach((p, i) => {
+    const rank = i + 1;
+    const pct = Math.round((p.inbound_vessels / maxCount) * 100);
+    const rankCol = rank <= 3 ? '#ef5350' : rank <= 10 ? '#ff9800' : 'var(--text2)';
+    const barCol  = rank <= 3 ? '#ef5350' : rank <= 10 ? '#ff9800' : 'var(--accent)';
+    const mapBtn  = p.lat && p.lon
+      ? `<span class="vessel-tag" style="cursor:pointer;font-size:9px" onclick="map.flyTo([${p.lat},${p.lon}],10,{duration:1.2})" title="Show on map">📍</span>`
+      : '';
+    const flag    = p.country_iso ? `<span style="font-size:10px;color:var(--text2)">${p.country_iso}</span>` : '';
+    const types   = Object.entries(p.top_types || {}).map(([t,c]) => `${t.split(' ').pop()}:${c}`).join(' ');
+
+    html += `<tr>
+      <td style="color:${rankCol};font-weight:700;font-size:11px">${rank}</td>
+      <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.name)}">
+        ${mapBtn} ${escHtml(p.name)}
+        ${p.unlocode ? `<span style="color:var(--text3);font-size:9px"> ${p.unlocode}</span>` : ''}
+      </td>
+      <td style="font-size:10px;color:var(--text2)">${flag} ${escHtml(p.country||'')}</td>
+      <td class="tt-num" style="color:${rankCol};font-weight:${rank<=10?'700':'400'}">${p.inbound_vessels.toLocaleString()}</td>
+      <td style="padding:2px 4px;min-width:50px">
+        <div style="background:var(--bg3);border-radius:2px;height:6px">
+          <div style="width:${pct}%;background:${barCol};height:6px;border-radius:2px"></div>
+        </div>
+        ${types ? `<div style="font-size:8px;color:var(--text3);margin-top:1px">${escHtml(types)}</div>` : ''}
+      </td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  tableDiv.innerHTML = html;
 }
 
 // ── Voyage Onboarding ─────────────────────────────────────────────────────
