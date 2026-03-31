@@ -30,12 +30,38 @@ def _set_cached(mmsi: int, data: dict):
 
 
 AFRICA_KEYWORDS = [
-    "MOMBASA", "DAR ES SALAAM", "MAPUTO", "DJIBOUTI", "MOGADISHU", "LAGOS", "APAPA",
-    "TEMA", "ABIDJAN", "DAKAR", "LUANDA", "DOUALA", "DURBAN", "CAPE TOWN",
-    "BEIRA", "NACALA", "TOAMASINA", "TAMATAVE", "ZANZIBAR", "LAMU",
-    "BERBERA", "AFRICA", "MADAGASCAR", "KENYA", "TANZANIA", "MOZAMBIQUE",
+    # East Africa
+    "MOMBASA", "DAR ES SALAAM", "ZANZIBAR", "LAMU", "TANGA",
+    # Madagascar / Indian Ocean
+    "TOAMASINA", "TAMATAVE", "TOLIARA", "MADAGASCAR",
+    # Mozambique
+    "MAPUTO", "BEIRA", "NACALA",
+    # Horn of Africa
+    "DJIBOUTI", "MOGADISHU", "BERBERA",
+    # Southern Africa
+    "DURBAN", "CAPE TOWN", "RICHARDS BAY", "PORT ELIZABETH",
+    # West Africa
+    "LAGOS", "APAPA", "TEMA", "ABIDJAN", "DAKAR", "LUANDA", "DOUALA",
+    "LOME", "COTONOU", "CONAKRY", "POINTE NOIRE",
+    # North Africa / Suez
+    "PORT SUDAN",
+    # Generic
+    "AFRICA", "KENYA", "TANZANIA", "MOZAMBIQUE",
     "NIGERIA", "GHANA", "SENEGAL", "ANGOLA", "CAMEROON", "SOMALIA",
 ]
+
+# ISO 3166-1 alpha-2 codes for African nations (comprehensive)
+AFRICA_FLAGS = {
+    # East Africa
+    "KE", "TZ", "UG", "RW", "BI", "ET", "ER", "DJ", "SO", "SS", "SD",
+    # Southern Africa
+    "ZA", "MZ", "MG", "MW", "ZM", "ZW", "BW", "NA", "SZ", "LS", "MU", "SC", "KM",
+    # West Africa
+    "NG", "GH", "SN", "CI", "CM", "AO", "GA", "CG", "CD", "GN", "ML", "BF",
+    "NE", "TG", "BJ", "SL", "LR", "GW", "GM", "CV", "MR", "GQ",
+    # North Africa
+    "EG", "LY", "TN", "DZ", "MA",
+}
 
 BAGGED_CARGO_TYPES = ["General Cargo", "Multi Purpose", "Cargo", "Bulk Carrier"]
 
@@ -102,8 +128,7 @@ def is_africa_trade(vessel: dict) -> Optional[str]:
             if kw in dest:
                 return f"Destination: {dest}"
 
-    africa_flags = {"MZ", "KE", "TZ", "NG", "GH", "SN", "AO", "CM", "DJ", "SO", "MG", "ZA"}
-    if is_cargo and flag in africa_flags:
+    if is_cargo and flag in AFRICA_FLAGS:
         return f"Africa-flagged ({flag})"
 
     return None

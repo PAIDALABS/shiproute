@@ -114,11 +114,8 @@ def test_is_africa_trade_no_match():
 def test_is_africa_trade_no_false_positive_dar():
     """dest='DARDANELLES', type='Cargo' -> returns None.
 
-    The keyword list contains 'DAR' which is a substring of 'DARDANELLES',
-    so this test verifies that substring matching does (or does not) trigger.
-    Per the AFRICA_KEYWORDS list, 'DAR' IS present and 'DAR' IS a substring
-    of 'DARDANELLES', so the current implementation will actually match.
-    This test documents the expected behaviour: DARDANELLES should NOT match.
+    AFRICA_KEYWORDS uses 'DAR ES SALAAM' (not bare 'DAR'), so 'DARDANELLES'
+    should not match. This test verifies no false positives from substring matching.
     """
     vessel = {
         "destination": "DARDANELLES",

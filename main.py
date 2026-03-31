@@ -19,7 +19,7 @@ from congestion_engine import CongestionEngine, MONITORED_PORTS
 from ais_stream import run_ais_stream
 from cargo_flow import compute_cargo_flow, compute_all_ports_flow, save_daily_snapshot
 from voyage_planner import calculate_multi_leg
-from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track
+from vessel_finder import search_vessels, get_vessel_detail, get_vessel_track, AFRICA_KEYWORDS, AFRICA_FLAGS, BAGGED_CARGO_TYPES
 from weather import get_route_weather, get_port_weather
 from market_intel import get_market_overview, get_africa_corridor
 
@@ -470,27 +470,15 @@ async def get_port_intelligence(locode: str):
     # ── Africa bagged cargo leads ────────────────────────────
     # Identify General Cargo / Multi Purpose vessels with African port destinations
     # These are the most likely bagged cargo carriers
-    africa_keywords = [
-        "AFRICA", "MOMBASA", "DAR ES SALAAM", "MAPUTO", "DJIBOUTI", "MOGADISHU",
-        "LAGOS", "APAPA", "TEMA", "ABIDJAN", "DAKAR", "LUANDA", "DOUALA",
-        "DURBAN", "CAPE TOWN", "PORT ELIZABETH", "BEIRA", "NACALA",
-        "TOAMASINA", "TAMATAVE", "ZANZIBAR", "LAMU", "BERBERA",
-        "MADAGASCAR", "KENYA", "TANZANIA", "MOZAMBIQUE", "NIGERIA",
-        "GHANA", "SENEGAL", "ANGOLA", "CAMEROON", "SOMALIA", "SUDAN",
-        "MZ", "KE", "TZ", "NG", "GH", "SN", "AO", "CM", "DJ", "SO",
-        "MG", "MU", "SC", "ZA",
-    ]
-    bagged_cargo_types = ["General Cargo", "Multi Purpose", "Cargo", "Bulk Carrier"]
-
     leads = []
     for v in vessels:
         vtype = v.get("type_specific") or v.get("type") or ""
         dest = (v.get("destination") or "").strip().upper()
         flag = (v.get("country_iso") or "").upper()
 
-        is_cargo_type = any(bt.lower() in vtype.lower() for bt in bagged_cargo_types)
-        is_africa_dest = any(kw in dest for kw in africa_keywords)
-        is_africa_flag = flag in ("MZ", "KE", "TZ", "NG", "GH", "SN", "AO", "CM", "DJ", "SO", "MG", "ZA")
+        is_cargo_type = any(bt.lower() in vtype.lower() for bt in BAGGED_CARGO_TYPES)
+        is_africa_dest = any(kw in dest for kw in AFRICA_KEYWORDS)
+        is_africa_flag = flag in AFRICA_FLAGS
 
         if is_cargo_type and (is_africa_dest or is_africa_flag):
             leads.append({

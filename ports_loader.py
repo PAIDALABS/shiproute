@@ -30,7 +30,7 @@ PORTS = [
     {"id": "idtpp", "name": "Tanjung Priok (Jakarta)", "country": "Indonesia", "locode": "IDTPP", "lat": -6.10, "lon": 106.88},
     {"id": "idplm", "name": "Palembang", "country": "Indonesia", "locode": "IDPLM", "lat": -2.99, "lon": 104.76},
     {"id": "idmak", "name": "Makassar", "country": "Indonesia", "locode": "IDMAK", "lat": -5.14, "lon": 119.42},
-    {"id": "vhsgn", "name": "Ho Chi Minh City", "country": "Vietnam", "locode": "VNSGN", "lat": 10.79, "lon": 106.72},
+    {"id": "vnsgn", "name": "Ho Chi Minh City", "country": "Vietnam", "locode": "VNSGN", "lat": 10.79, "lon": 106.72},
     {"id": "vnhan", "name": "Haiphong", "country": "Vietnam", "locode": "VNHAN", "lat": 20.87, "lon": 106.68},
     {"id": "thbkk", "name": "Bangkok (Laem Chabang)", "country": "Thailand", "locode": "THLCH", "lat": 13.08, "lon": 100.88},
     {"id": "phmnl", "name": "Manila", "country": "Philippines", "locode": "PHMNL", "lat": 14.59, "lon": 120.97},
@@ -59,7 +59,7 @@ PORTS = [
     # Red Sea / East Africa
     {"id": "djjib", "name": "Djibouti", "country": "Djibouti", "locode": "DJJIB", "lat": 11.60, "lon": 43.14},
     {"id": "somgq", "name": "Mogadishu", "country": "Somalia", "locode": "SOMGQ", "lat": 2.04, "lon": 45.34},
-    {"id": "etmop", "name": "Mombasa", "country": "Kenya", "locode": "KEMBA", "lat": -4.05, "lon": 39.67},
+    {"id": "kemba", "name": "Mombasa", "country": "Kenya", "locode": "KEMBA", "lat": -4.05, "lon": 39.67},
     {"id": "tzdar", "name": "Dar es Salaam", "country": "Tanzania", "locode": "TZDAR", "lat": -6.82, "lon": 39.29},
     {"id": "mzmpm", "name": "Maputo", "country": "Mozambique", "locode": "MZMPM", "lat": -25.97, "lon": 32.57},
     {"id": "zadur", "name": "Durban", "country": "South Africa", "locode": "ZADUR", "lat": -29.87, "lon": 31.03},

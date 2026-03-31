@@ -3,6 +3,7 @@
 import time
 from collections import defaultdict
 from congestion_engine import CongestionEngine, MONITORED_PORTS
+from vessel_finder import AFRICA_KEYWORDS, BAGGED_CARGO_TYPES
 
 
 def get_market_overview(engine: CongestionEngine) -> dict:
@@ -19,7 +20,7 @@ def get_market_overview(engine: CongestionEngine) -> dict:
             t = v.get("ship_type") or "Unknown"
             type_counts[t] += 1
             dest = (v.get("destination") or "").upper()
-            if any(kw in dest for kw in ["MOMBASA", "DAR ES SALAAM", "MAPUTO", "DJIBOUTI", "LAGOS", "TEMA", "DURBAN", "BEIRA", "NACALA", "TOAMASINA", "AFRICA"]):
+            if any(kw in dest for kw in AFRICA_KEYWORDS):
                 africa_count += 1
 
         ports.append({
@@ -61,17 +62,11 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
     india_ports = ["INKAN", "INKAK", "INVTZ", "INNSA", "INMUN"]
     africa_ports = ["MGTNR", "MGTLE", "KEMBA", "TZDAR"]
 
-    africa_keywords = [
-        "MOMBASA", "DAR ES SALAAM", "MAPUTO", "DJIBOUTI", "MOGADISHU", "LAGOS",
-        "TEMA", "DURBAN", "BEIRA", "NACALA", "TOAMASINA", "ZANZIBAR",
-        "AFRICA", "LAMU", "BERBERA", "TANGA",
-    ]
     india_keywords = [
         "KANDLA", "KAKINADA", "VIZAG", "VISHAKHAPATNAM", "INDIA",
         "MUMBAI", "MUNDRA", "NHAVA", "JNPT", "CHENNAI", "HALDIA",
         "PARADIP", "TUTICORIN", "KOLKATA", "KOCHI",
     ]
-    bagged_types = ["Cargo", "General Cargo", "Multi Purpose", "Bulk Carrier"]
 
     corridor_vessels = []
 
@@ -83,8 +78,8 @@ def get_africa_corridor(engine: CongestionEngine) -> dict:
             dest = (v.get("destination") or "").upper()
             vtype = v.get("type_specific") or v.get("ship_type") or ""
 
-            is_bagged_type = any(bt.lower() in vtype.lower() for bt in bagged_types)
-            is_africa_dest = any(kw in dest for kw in africa_keywords)
+            is_bagged_type = any(bt.lower() in vtype.lower() for bt in BAGGED_CARGO_TYPES)
+            is_africa_dest = any(kw in dest for kw in AFRICA_KEYWORDS)
 
             is_india_dest = any(kw in dest for kw in india_keywords)
             if is_bagged_type and (
