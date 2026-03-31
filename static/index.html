@@ -204,7 +204,9 @@
     <!-- ── Market Intel Mode ────────────────────────────────────────── -->
     <div id="market-mode" class="hidden">
       <div><div class="brand-title">Market Intel</div><div class="brand-sub">Global fleet · all ports · live destinations</div></div>
-      <input id="market-port-search" class="inp" type="text" placeholder="Filter ports by name or country..." style="margin:6px 0;width:100%;box-sizing:border-box" aria-label="Filter ports">
+      <!-- Port monitoring groups bar -->
+      <div id="pg-bar" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:6px 0 2px"></div>
+      <input id="market-port-search" class="inp" type="text" placeholder="Filter ports by name or country..." style="margin:4px 0;width:100%;box-sizing:border-box" aria-label="Filter ports">
       <div id="market-loading" class="vessel-empty">Loading market data...</div>
       <div id="market-content"></div>
     </div><!-- /#market-mode -->
@@ -358,6 +360,34 @@
     <div id="pd-vessel-list" class="vessel-list"></div>
 
   </div><!-- /#port-detail -->
+
+  <!-- Port Groups Modal -->
+  <div id="pg-modal" class="hidden">
+    <div id="pg-modal-inner">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">Create Port Group</div>
+        <button id="pg-modal-close" style="background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:0 4px" aria-label="Close">✕</button>
+      </div>
+      <input id="pg-name-inp" class="inp" type="text" placeholder="Group name (e.g. East Africa)" maxlength="40" aria-label="Group name">
+      <div style="font-size:11px;color:var(--text2);margin:2px 0 4px">Add ports by:</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+        <select id="pg-continent-sel" class="inp" style="flex:1;min-width:100px;padding:4px 6px;font-size:11px" aria-label="Add by continent">
+          <option value="">Continent…</option>
+        </select>
+        <select id="pg-country-sel" class="inp" style="flex:1;min-width:100px;padding:4px 6px;font-size:11px" aria-label="Add by country">
+          <option value="">Country…</option>
+        </select>
+      </div>
+      <input id="pg-port-search-inp" class="inp" type="text" placeholder="Search port by name or LOCODE…" style="font-size:11px;margin-bottom:6px" aria-label="Search individual port">
+      <div id="pg-port-search-results" style="max-height:80px;overflow-y:auto;margin-bottom:6px"></div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Selected: <span id="pg-count">0</span> ports</div>
+      <div id="pg-draft-list" style="max-height:120px;overflow-y:auto;margin-bottom:8px;border:1px solid var(--border);border-radius:4px;padding:4px"></div>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button id="pg-cancel-btn" class="sort-btn" style="font-size:11px">Cancel</button>
+        <button id="pg-save-btn" class="sort-btn" style="font-size:11px;background:var(--accent);color:#fff">Save Group</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

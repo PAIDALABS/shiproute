@@ -342,6 +342,25 @@ def api_port_db_status():
     from port_database import get_database_status
     return get_database_status()
 
+@app.get("/api/ports/database/list")
+def api_port_db_list():
+    """Return all ports in the database for group building."""
+    from port_database import _port_db
+    ports = [
+        {
+            "name":        p.get("port_name", ""),
+            "country":     p.get("country_name", ""),
+            "country_iso": p.get("country_iso", ""),
+            "unlocode":    p.get("unlocode", ""),
+            "lat":         p.get("lat"),
+            "lon":         p.get("lon"),
+            "area_lvl1":   p.get("area_lvl1", ""),
+            "area_lvl2":   p.get("area_lvl2", ""),
+        }
+        for p in _port_db.values()
+    ]
+    return {"ports": ports, "count": len(ports)}
+
 
 # ── Arrival Advisory ──────────────────────────────────────────────────────────
 

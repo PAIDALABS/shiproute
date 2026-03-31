@@ -619,6 +619,7 @@ function switchMode(mode) {
   } else if (mode === 'market') {
     marketEl.classList.remove('hidden');
     btnMarket.classList.add('active');
+    pgRenderBar();
     loadMarketData();
   } else if (mode === 'command') {
     $('command-mode').classList.remove('hidden');
@@ -1738,6 +1739,232 @@ function renderRouteWeather(data) {
 }
 
 
+// ── Port Monitoring Groups ───────────────────────────────────────────────────
+const PG_KEY = 'shiproute_port_groups';
+let _portDbCache = null;   // full port list from /api/ports/database/list
+let _pgDraft = { name: '', unlocodes: new Set() };
+
+function pgLoad() {
+  try {
+    const raw = localStorage.getItem(PG_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      // unlocodes are stored as arrays, re-hydrate as arrays (Set built on demand)
+      return d;
+    }
+  } catch {}
+  return { groups: [], activeGroupId: null };
+}
+
+function pgSave(state) {
+  try { localStorage.setItem(PG_KEY, JSON.stringify(state)); } catch {}
+}
+
+function pgGetActive() {
+  const state = pgLoad();
+  if (!state.activeGroupId) return null;
+  return state.groups.find(g => g.id === state.activeGroupId) || null;
+}
+
+function pgSetActive(id) {
+  const state = pgLoad();
+  state.activeGroupId = id;
+  pgSave(state);
+}
+
+function pgDelete(id) {
+  const state = pgLoad();
+  state.groups = state.groups.filter(g => g.id !== id);
+  if (state.activeGroupId === id) state.activeGroupId = null;
+  pgSave(state);
+}
+
+function pgRenderBar() {
+  const bar = document.getElementById('pg-bar');
+  if (!bar) return;
+  const state = pgLoad();
+  const activeId = state.activeGroupId;
+  let html = `<button class="pg-chip${!activeId ? ' active' : ''}" onclick="pgSetActive(null);pgApplyFilter()">All Ports</button>`;
+  state.groups.forEach(g => {
+    const isActive = g.id === activeId;
+    html += `<span class="pg-chip${isActive ? ' active' : ''}" onclick="pgSetActive('${g.id}');pgApplyFilter()">
+      ${escHtml(g.name)} <span style="font-size:9px;opacity:.7">${g.unlocodes.length}</span>
+      <button class="pg-chip-del" onclick="event.stopPropagation();pgConfirmDelete('${g.id}')" title="Remove group">✕</button>
+    </span>`;
+  });
+  html += `<button class="pg-chip" onclick="pgOpenModal()" title="Create new group">+ Group</button>`;
+  bar.innerHTML = html;
+}
+
+function pgConfirmDelete(id) {
+  const state = pgLoad();
+  const g = state.groups.find(x => x.id === id);
+  if (!g) return;
+  if (confirm(`Delete group "${g.name}"?`)) {
+    pgDelete(id);
+    pgRenderBar();
+    pgApplyFilter();
+  }
+}
+
+function pgApplyFilter() {
+  if (!_marketGlobalData) return;
+  const active = pgGetActive();
+  const uSet = active ? new Set(active.unlocodes) : null;
+  const q = (document.getElementById('market-port-search')?.value || '').trim().toLowerCase();
+  renderGlobalPortTable(_marketGlobalData, q, uSet);
+  pgRenderBar();
+}
+
+// ── Port Groups Modal ────────────────────────────────────────────────────────
+async function pgFetchPortDb() {
+  if (_portDbCache) return _portDbCache;
+  try {
+    const r = await fetch('/api/ports/database/list');
+    if (!r.ok) return [];
+    const d = await r.json();
+    _portDbCache = d.ports || [];
+  } catch { _portDbCache = []; }
+  return _portDbCache;
+}
+
+async function pgOpenModal() {
+  _pgDraft = { name: '', unlocodes: new Set() };
+  const modal = document.getElementById('pg-modal');
+  modal.classList.remove('hidden');
+  document.getElementById('pg-name-inp').value = '';
+  document.getElementById('pg-port-search-inp').value = '';
+  document.getElementById('pg-port-search-results').innerHTML = '';
+  pgRenderDraftPorts();
+
+  // Load port DB and populate continent select
+  const ports = await pgFetchPortDb();
+  const continentSel = document.getElementById('pg-continent-sel');
+  const continents = [...new Set(ports.filter(p => p.area_lvl1).map(p => p.area_lvl1))].sort();
+  continentSel.innerHTML = '<option value="">Continent…</option>' +
+    continents.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+
+  // Country select: update when continent changes
+  continentSel.onchange = function() {
+    const sel = this.value;
+    const countrySel = document.getElementById('pg-country-sel');
+    if (!sel) {
+      countrySel.innerHTML = '<option value="">Country…</option>';
+      return;
+    }
+    const countries = [...new Map(
+      ports.filter(p => p.area_lvl1 === sel && p.country_iso)
+           .map(p => [p.country_iso, p.country])
+    )].map(([iso, name]) => ({ iso, name })).sort((a, b) => a.name.localeCompare(b.name));
+    countrySel.innerHTML = '<option value="">All countries…</option>' +
+      countries.map(c => `<option value="${escHtml(c.iso)}">${escHtml(c.name)}</option>`).join('');
+    // Auto-add entire continent
+    const match = ports.filter(p => p.area_lvl1 === sel && p.unlocode);
+    match.forEach(p => _pgDraft.unlocodes.add(p.unlocode.toUpperCase()));
+    pgRenderDraftPorts();
+  };
+
+  // Country change: narrow down to that country
+  document.getElementById('pg-country-sel').onchange = function() {
+    const iso = this.value;
+    const continent = continentSel.value;
+    const base = ports.filter(p =>
+      (iso ? p.country_iso === iso : p.area_lvl1 === continent) && p.unlocode
+    );
+    // Remove previous continent ports, add country-only ports
+    if (iso) {
+      // Remove ports that were added by continent but are NOT in the selected country
+      const continentPorts = new Set(
+        ports.filter(p => p.area_lvl1 === continent && p.unlocode).map(p => p.unlocode.toUpperCase())
+      );
+      const countryPorts = new Set(
+        ports.filter(p => p.country_iso === iso && p.unlocode).map(p => p.unlocode.toUpperCase())
+      );
+      continentPorts.forEach(u => {
+        if (!countryPorts.has(u)) _pgDraft.unlocodes.delete(u);
+      });
+      countryPorts.forEach(u => _pgDraft.unlocodes.add(u));
+    } else {
+      // Revert to full continent
+      if (continent) {
+        ports.filter(p => p.area_lvl1 === continent && p.unlocode)
+             .forEach(p => _pgDraft.unlocodes.add(p.unlocode.toUpperCase()));
+      }
+    }
+    pgRenderDraftPorts();
+  };
+
+  // Port search
+  const portSearchInp = document.getElementById('pg-port-search-inp');
+  portSearchInp.oninput = function() {
+    const q = this.value.trim().toLowerCase();
+    const resultsEl = document.getElementById('pg-port-search-results');
+    if (!q || q.length < 2) { resultsEl.innerHTML = ''; return; }
+    const matches = ports.filter(p =>
+      p.name.toLowerCase().includes(q) || (p.unlocode || '').toLowerCase().includes(q)
+    ).slice(0, 8);
+    resultsEl.innerHTML = matches.map(p =>
+      `<div class="pg-search-row" onclick="pgAddSinglePort('${escHtml(p.unlocode)}','${escHtml(p.name.replace(/'/g,''))}')">
+        <strong>${escHtml(p.unlocode)}</strong> ${escHtml(p.name)} <span style="opacity:.5">${escHtml(p.country_iso)}</span>
+      </div>`
+    ).join('') || '<div class="pg-search-row" style="cursor:default">No matches</div>';
+  };
+}
+
+function pgAddSinglePort(unlocode, name) {
+  _pgDraft.unlocodes.add(unlocode.toUpperCase());
+  pgRenderDraftPorts();
+  document.getElementById('pg-port-search-inp').value = '';
+  document.getElementById('pg-port-search-results').innerHTML = '';
+}
+
+function pgRenderDraftPorts() {
+  const list = document.getElementById('pg-draft-list');
+  const countEl = document.getElementById('pg-count');
+  if (!list) return;
+  const arr = [..._pgDraft.unlocodes].sort();
+  countEl.textContent = arr.length;
+  if (!arr.length) {
+    list.innerHTML = '<div style="font-size:10px;color:var(--text3);padding:4px">No ports selected yet. Choose a continent or country above, or search for a port.</div>';
+    return;
+  }
+  list.innerHTML = arr.map(u =>
+    `<div class="pg-port-row">
+      <span>${u}</span>
+      <button class="pg-remove-btn" onclick="_pgDraft.unlocodes.delete('${u}');pgRenderDraftPorts()" title="Remove">✕</button>
+    </div>`
+  ).join('');
+}
+
+function pgCloseModal() {
+  document.getElementById('pg-modal')?.classList.add('hidden');
+  _pgDraft = { name: '', unlocodes: new Set() };
+}
+
+function pgSaveDraft() {
+  const name = document.getElementById('pg-name-inp')?.value.trim();
+  if (!name) { document.getElementById('pg-name-inp')?.focus(); return; }
+  if (_pgDraft.unlocodes.size === 0) { alert('Add at least one port to the group.'); return; }
+  const state = pgLoad();
+  const id = 'grp_' + Date.now();
+  state.groups.push({ id, name, unlocodes: [..._pgDraft.unlocodes] });
+  state.activeGroupId = id;
+  pgSave(state);
+  pgCloseModal();
+  pgRenderBar();
+  pgApplyFilter();
+}
+
+// Wire modal buttons (runs after DOM ready, at bottom of file)
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('pg-modal-close')?.addEventListener('click', pgCloseModal);
+  document.getElementById('pg-cancel-btn')?.addEventListener('click', pgCloseModal);
+  document.getElementById('pg-save-btn')?.addEventListener('click', pgSaveDraft);
+  document.getElementById('pg-modal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('pg-modal')) pgCloseModal();
+  });
+});
+
 // ── Market Intel Mode ────────────────────────────────────────────────────────
 let _marketGlobalData = null; // cached for filter
 
@@ -1770,7 +1997,9 @@ async function loadMarketData() {
 document.getElementById('market-port-search')?.addEventListener('input', function() {
   if (!_marketGlobalData) return;
   const q = this.value.trim().toLowerCase();
-  renderGlobalPortTable(_marketGlobalData, q);
+  const active = pgGetActive();
+  const uSet = active ? new Set(active.unlocodes) : null;
+  renderGlobalPortTable(_marketGlobalData, q, uSet);
 });
 
 function renderMarketIntel(overview, corridor, globalData) {
@@ -1862,10 +2091,14 @@ function renderMarketIntel(overview, corridor, globalData) {
   content.innerHTML = html;
 
   // Render global port table below (uses its own container div)
-  if (globalData) renderGlobalPortTable(globalData, '');
+  if (globalData) {
+    const active = pgGetActive();
+    const uSet = active ? new Set(active.unlocodes) : null;
+    renderGlobalPortTable(globalData, '', uSet);
+  }
 }
 
-function renderGlobalPortTable(globalData, filterQ) {
+function renderGlobalPortTable(globalData, filterQ, uSet = null) {
   const content = document.getElementById('market-content');
 
   // Remove any existing global-port-table div, re-append
@@ -1878,14 +2111,17 @@ function renderGlobalPortTable(globalData, filterQ) {
 
   const ports = globalData.ports || [];
   const q = (filterQ || '').toLowerCase();
-  const filtered = q
-    ? ports.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        (p.country || '').toLowerCase().includes(q) ||
-        (p.unlocode || '').toLowerCase().includes(q) ||
-        p.key.toLowerCase().includes(q)
-      )
-    : ports;
+
+  // Apply group filter first, then text filter
+  let filtered = uSet ? ports.filter(p => p.unlocode && uSet.has(p.unlocode.toUpperCase())) : ports;
+  if (q) {
+    filtered = filtered.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.country || '').toLowerCase().includes(q) ||
+      (p.unlocode || '').toLowerCase().includes(q) ||
+      p.key.toLowerCase().includes(q)
+    );
+  }
 
   const maxCount = filtered[0]?.inbound_vessels || 1;
 
