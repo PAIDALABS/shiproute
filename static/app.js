@@ -25,14 +25,21 @@ let finderPort   = null;
 let finderMarkers = L.featureGroup();
 let finderTrackLayer = null;
 
-// ── Command Center state ─────────────────────────────────────────────────
-let ccOriginPort = null;
-let ccDestPort = null;
-let ccRouteData = null;
+// ── Fleet Dashboard state ─────────────────────────────────────────────────
+let fleetData          = null;
+let fleetAllVessels    = [];
+let fleetFilteredVessels = [];
+let fleetRefreshTimer  = null;
+let fleetVesselMarkers = L.featureGroup();
+let fleetPortMarkers   = L.featureGroup();
+let fleetRouteLayer    = null;
+let fleetVoyageOrigin  = null;
+
+// Keep CC aliases so switchMode cleanup code doesn't break
+const ccVesselMarkers  = L.featureGroup();
+const ccWeatherMarkers = L.featureGroup();
+const ccPortMarkers    = L.featureGroup();
 let ccRouteLayer = null;
-let ccVesselMarkers = L.featureGroup();
-let ccWeatherMarkers = L.featureGroup();
-let ccPortMarkers = L.featureGroup();
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -546,6 +553,14 @@ function switchMode(mode) {
   liveVesselMarkers.clearLayers();
   livePortMarkers.clearLayers();
 
+  // Stop fleet refresh
+  if (fleetRefreshTimer) {
+    clearInterval(fleetRefreshTimer);
+    fleetRefreshTimer = null;
+  }
+  fleetVesselMarkers.clearLayers();
+  fleetPortMarkers.clearLayers();
+
   appMode = mode;
 
   // Hide all mode panels
@@ -608,10 +623,10 @@ function switchMode(mode) {
   } else if (mode === 'command') {
     $('command-mode').classList.remove('hidden');
     $('btn-command-mode').classList.add('active');
-    ccVesselMarkers.addTo(map);
-    ccWeatherMarkers.addTo(map);
-    ccPortMarkers.addTo(map);
-    if (ccRouteLayer) ccRouteLayer.addTo(map);
+    fleetVesselMarkers.addTo(map);
+    fleetPortMarkers.addTo(map);
+    loadFleetDashboard();
+    fleetRefreshTimer = setInterval(loadFleetDashboard, 60000);
   }
 }
 
@@ -1866,136 +1881,347 @@ document.querySelectorAll('.onboard-btn').forEach(btn => {
   });
 });
 
-// ── Command Center ───────────────────────────────────────────────────────
-(function initCommandCenter() {
-  const originInput = $('cc-origin-search');
-  const originDD = $('cc-origin-dropdown');
-  const destInput = $('cc-dest-search');
-  const destDD = $('cc-dest-dropdown');
-  if (!originInput || !destInput) return;
+// ── Fleet Dashboard ──────────────────────────────────────────────────────
 
-  originInput.setAttribute('aria-label', 'Origin port');
-  destInput.setAttribute('aria-label', 'Destination port');
+const FLEET_AFRICA_KEYWORDS = [
+  'MOMBASA', 'DAR ES SALAAM', 'ZANZIBAR', 'LAMU', 'TANGA',
+  'TOAMASINA', 'TAMATAVE', 'TOLIARA', 'MADAGASCAR',
+  'MAPUTO', 'BEIRA', 'NACALA',
+  'DJIBOUTI', 'MOGADISHU', 'BERBERA',
+  'DURBAN', 'CAPE TOWN', 'RICHARDS BAY', 'PORT ELIZABETH',
+  'LAGOS', 'APAPA', 'TEMA', 'ABIDJAN', 'DAKAR', 'LUANDA', 'DOUALA',
+  'LOME', 'COTONOU', 'CONAKRY', 'POINTE NOIRE',
+  'PORT SUDAN',
+  'AFRICA', 'KENYA', 'TANZANIA', 'MOZAMBIQUE',
+  'NIGERIA', 'GHANA', 'SENEGAL', 'ANGOLA', 'CAMEROON', 'SOMALIA',
+];
 
-  createPortAutocomplete(originInput, originDD, (port) => {
-    ccOriginPort = { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode };
-    originInput.value = `${port.name} (${port.locode})`;
-    fetchCCPortQuickIntel(port.locode, 'cc-origin-intel');
-  }, { onClear: () => { ccOriginPort = null; $('cc-origin-intel').innerHTML = ''; } });
+const FLEET_AFRICA_FLAGS = new Set([
+  'KE','TZ','UG','RW','BI','ET','ER','DJ','SO','SS','SD',
+  'ZA','MZ','MG','MW','ZM','ZW','BW','NA','SZ','LS','MU','SC','KM',
+  'NG','GH','SN','CI','CM','AO','GA','CG','CD','GN','ML','BF',
+  'NE','TG','BJ','SL','LR','GW','GM','CV','MR','GQ',
+  'EG','LY','TN','DZ','MA',
+]);
 
-  createPortAutocomplete(destInput, destDD, (port) => {
-    ccDestPort = { name: port.name, lat: port.lat, lon: port.lon, locode: port.locode };
-    destInput.value = `${port.name} (${port.locode})`;
-    fetchCCPortQuickIntel(port.locode, 'cc-dest-intel');
-  }, { onClear: () => { ccDestPort = null; $('cc-dest-intel').innerHTML = ''; } });
+function scoreFleetAvailability(v) {
+  let score = 0;
+  const reasons = [];
+  const speed = v.speed || 0;
+  const dest = (v.destination || '').trim().toUpperCase();
+  const state = (v.state || '').toUpperCase();
 
-  $('cc-calc-btn')?.addEventListener('click', calculateCommandCenter);
-})();
-
-async function fetchCCPortQuickIntel(locode, targetId) {
-  const el = $(targetId);
-  if (!el) return;
-  el.innerHTML = '<div class="cc-loading-sm"><div class="spinner"></div></div>';
-  try {
-    const res = await fetch(`/api/port-watch/${encodeURIComponent(locode)}/arrival-advisory`);
-    const d = await res.json();
-    if (!d.monitored) { el.innerHTML = '<div class="cc-muted">Not in live monitoring</div>'; return; }
-    const col = levelColor(d.severity);
-    el.innerHTML = `<div class="cc-port-quick" style="border-left:3px solid ${col}">
-      <div class="cc-quick-row"><span>${severityIcon(d.severity)} ${escHtml(d.severity)}</span><span style="color:${col};font-weight:700">${escHtml(String(d.congestion_score))}</span></div>
-      <div class="cc-quick-row"><span>${d.current_queue} in queue</span><span>${d.estimated_wait_hours > 0 ? d.estimated_wait_hours + 'h wait' : 'No wait'}</span></div>
-    </div>`;
-  } catch { el.innerHTML = ''; }
+  if (speed < 0.5 || state === 'ANCHORED') {
+    score += 0.3; reasons.push('Stationary');
+  } else if (speed < 2) {
+    score += 0.1; reasons.push('Barely moving');
+  }
+  if (!dest || dest === 'CLASS B') {
+    score += 0.10; reasons.push('No destination');
+  }
+  const vtype = (v.type_specific || v.ship_type || v.type || '').toLowerCase();
+  if (['cargo','bulk','tanker','general','multi purpose'].some(t => vtype.includes(t))) {
+    score += 0.15; reasons.push('Commercial type');
+  }
+  if ((speed < 0.5 || state === 'ANCHORED') && state !== 'BERTHED') {
+    score += 0.2; reasons.push('At anchorage');
+  }
+  score = Math.min(score, 1.0);
+  const label = score >= 0.7 ? 'Likely Available'
+    : score >= 0.4 ? 'Possibly Available'
+    : score >= 0.2 ? 'Uncertain'
+    : 'En Route';
+  return { score: Math.round(score * 100) / 100, label, reasons };
 }
 
-async function calculateCommandCenter() {
-  if (!ccOriginPort || !ccDestPort) { showCCError('Select both origin and destination'); return; }
-  hideCCError();
-  const btn = $('cc-calc-btn');
-  btn.disabled = true;
-  btn.setAttribute('aria-busy', 'true');
-  $('cc-loading').classList.remove('hidden');
+function isFleetAfricaTrade(v) {
+  const dest = (v.destination || '').toUpperCase();
+  const flag = (v.country_iso || '').toUpperCase();
+  const vtype = (v.type_specific || v.ship_type || v.type || '').toLowerCase();
+  const isCargo = ['cargo','bulk','tanker','general','multi purpose'].some(t => vtype.includes(t));
+  if (!isCargo) return null;
+  for (const kw of FLEET_AFRICA_KEYWORDS) {
+    if (dest.includes(kw)) return `→ ${dest}`;
+  }
+  if (FLEET_AFRICA_FLAGS.has(flag)) return `Flag: ${flag}`;
+  return null;
+}
 
-  // Clear previous
-  ['cc-route-summary','cc-vessels-section','cc-dest-detail','cc-weather-section','cc-market-section'].forEach(id => $(id)?.classList.add('hidden'));
-  if (ccRouteLayer) { ccRouteLayer.remove(); ccRouteLayer = null; }
-  ccVesselMarkers.clearLayers(); ccWeatherMarkers.clearLayers(); ccPortMarkers.clearLayers();
-
-  const speed = parseFloat($('cc-speed')?.value) || 14;
-  const fuelCons = parseFloat($('cc-fuel-cons')?.value) || 22;
-
+async function loadFleetDashboard() {
   try {
-    // BATCH 1 — parallel
-    const [routeRes, vesselsRes, origRes, destRes, mktRes, corrRes] = await Promise.all([
-      fetch('/api/route/multi', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ waypoints: [
-          { lat: ccOriginPort.lat, lon: ccOriginPort.lon, name: ccOriginPort.name },
-          { lat: ccDestPort.lat, lon: ccDestPort.lon, name: ccDestPort.name },
-        ], speed_knots: speed }),
-      }),
-      fetch(`/api/vessels/search?locode=${encodeURIComponent(ccOriginPort.locode)}`),
-      fetch(`/api/port-watch/${encodeURIComponent(ccOriginPort.locode)}/arrival-advisory`),
-      fetch(`/api/port-watch/${encodeURIComponent(ccDestPort.locode)}/arrival-advisory`),
-      fetch('/api/market/overview'),
-      fetch('/api/market/africa-corridor'),
-    ]);
+    const res = await fetch('/api/fleet/all');
+    if (!res.ok) throw new Error('API error');
+    fleetData = await res.json();
 
-    const route = routeRes.ok ? await routeRes.json() : null;
-    const vessels = vesselsRes.ok ? await vesselsRes.json() : null;
-    const origCong = origRes.ok ? await origRes.json() : null;
-    const destCong = destRes.ok ? await destRes.json() : null;
-    const market = mktRes.ok ? await mktRes.json() : null;
-    const corridor = corrRes.ok ? await corrRes.json() : null;
+    // Score and tag each vessel
+    fleetAllVessels = (fleetData.vessels || []).map(v => {
+      v._avail = scoreFleetAvailability(v);
+      v._africa = isFleetAfricaTrade(v);
+      return v;
+    });
 
-    if (!route || route.error) throw new Error(route?.error || 'Route calculation failed');
-    ccRouteData = route;
-
-    $('cc-loading').classList.add('hidden');
-    btn.disabled = false;
-    btn.setAttribute('aria-busy', 'false');
-
-    // RENDER BATCH 1
-    renderCCRoute(route, speed, fuelCons);
-    renderCCDestIntel(destCong);
-    renderCCVessels(vessels);
-    renderCCMarket(market, corridor);
-    renderCCRouteOnMap(route);
-    renderCCPortsOnMap(origCong, destCong);
-    renderCCVesselsOnMap(vessels);
-
-    // BATCH 2 — background weather
-    $('cc-weather-section').classList.remove('hidden');
-    $('cc-weather-content').innerHTML = '<div class="cc-loading-sm"><div class="spinner"></div> Loading weather...</div>';
-    try {
-      const geoJSON = { type: 'FeatureCollection', features: route.legs.map(l => l.route) };
-      const wxRes = await fetch('/api/weather/route', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ route_geojson: geoJSON, speed_knots: speed, departure_time: new Date().toISOString() }),
-      });
-      if (wxRes.ok) {
-        const wx = await wxRes.json();
-        renderCCWeather(wx);
-        renderCCWeatherOnMap(wx);
-      } else {
-        $('cc-weather-content').innerHTML = '<div class="cc-muted">Weather unavailable</div>';
-      }
-    } catch { $('cc-weather-content').innerHTML = '<div class="cc-muted">Weather unavailable</div>'; }
-
-  } catch (err) {
-    $('cc-loading').classList.add('hidden');
-    btn.disabled = false;
-    btn.setAttribute('aria-busy', 'false');
-    showCCError(err.message || 'Calculation failed');
+    renderFleetStats();
+    renderFleetArrivals();
+    populateFleetPortFilter();
+    applyFleetFilters();
+    renderFleetPortsOnMap();
+  } catch (e) {
+    console.error('Fleet load failed', e);
   }
 }
 
-function showCCError(msg) { const e = $('cc-error'); if(e){e.textContent=msg;e.classList.remove('hidden');e.setAttribute('role','alert');} }
-function hideCCError() { $('cc-error')?.classList.add('hidden'); }
+function renderFleetStats() {
+  if (!fleetAllVessels.length) return;
+  const total = fleetAllVessels.length;
+  const anchored = fleetAllVessels.filter(v => (v.state||'').toUpperCase() === 'ANCHORED').length;
+  const berthed  = fleetAllVessels.filter(v => (v.state||'').toUpperCase() === 'BERTHED').length;
+  const moving   = fleetAllVessels.filter(v => (v.speed||0) > 0.5 && (v.state||'').toUpperCase() !== 'ANCHORED').length;
+  const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+  set('fleet-total', total);
+  set('fleet-anchored', anchored);
+  set('fleet-berthed', berthed);
+  set('fleet-moving', moving);
+}
 
-// ── Command Center: Sidebar Render Functions ─────────────────────────────
+function renderFleetArrivals() {
+  const inbound = fleetData?.inbound || {};
+  const ports   = fleetData?.ports  || [];
+  const list    = $('fleet-arrivals-list');
+  const badge   = $('fleet-arrivals-count');
+  if (!list) return;
+
+  const entries = ports.map(p => ({
+    locode: p.locode,
+    name: p.name,
+    count: inbound[p.locode]?.count || 0,
+  })).filter(p => p.count > 0).sort((a,b) => b.count - a.count);
+
+  if (badge) badge.textContent = entries.reduce((s, e) => s + e.count, 0);
+
+  list.innerHTML = entries.map(e => `
+    <div class="fleet-arrival-row" onclick="filterFleetByInbound('${escHtml(e.locode)}')" style="cursor:pointer;padding:4px 8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;color:var(--text1)">${escHtml(e.name)}</span>
+      <span class="cc-count-badge">${e.count} inbound</span>
+    </div>`).join('') || '<div style="padding:8px;font-size:11px;color:var(--text2)">No inbound data yet</div>';
+}
+
+function filterFleetByInbound(locode) {
+  const portSel = $('fleet-filter-port');
+  if (portSel) portSel.value = locode;
+  applyFleetFilters();
+}
+
+function populateFleetPortFilter() {
+  const sel = $('fleet-filter-port');
+  if (!sel || sel.options.length > 1) return; // already populated
+  (fleetData?.ports || []).forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.locode;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  });
+}
+
+function applyFleetFilters() {
+  const typeF  = ($('fleet-filter-type')?.value || '').toLowerCase();
+  const portF  = ($('fleet-filter-port')?.value || '').toUpperCase();
+  const stateF = ($('fleet-filter-state')?.value || '').toUpperCase();
+  const destF  = ($('fleet-filter-dest')?.value || '').toUpperCase();
+  const availF = $('fleet-filter-available')?.checked;
+  const africaF= $('fleet-filter-africa')?.checked;
+
+  fleetFilteredVessels = fleetAllVessels.filter(v => {
+    if (typeF && !(v.type_specific||v.ship_type||v.type||'').toLowerCase().includes(typeF)) return false;
+    if (portF && (v.port_locode||'').toUpperCase() !== portF) return false;
+    if (stateF && (v.state||'').toUpperCase() !== stateF) return false;
+    if (destF && !(v.destination||'').toUpperCase().includes(destF)) return false;
+    if (availF && v._avail.score < 0.4) return false;
+    if (africaF && !v._africa) return false;
+    return true;
+  });
+
+  const badge = $('fleet-vessel-count');
+  if (badge) badge.textContent = fleetFilteredVessels.length;
+
+  // Sort: available first, then by state priority
+  fleetFilteredVessels.sort((a,b) => b._avail.score - a._avail.score);
+
+  renderFleetVesselList();
+  renderFleetVesselsOnMap();
+}
+
+function renderFleetVesselList() {
+  const el = $('fleet-vessel-list');
+  if (!el) return;
+  const slice = fleetFilteredVessels.slice(0, 100);
+  if (!slice.length) {
+    el.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text2);text-align:center">No vessels match filters</div>';
+    return;
+  }
+  el.innerHTML = slice.map(v => {
+    const s = v._avail.score;
+    const dot = s >= 0.6 ? '#4caf50' : s >= 0.3 ? '#ff9800' : '#8b949e';
+    const name = escHtml(v.name || `MMSI ${v.mmsi}`);
+    const type = escHtml(v.type_specific || v.ship_type || v.type || '');
+    const state = escHtml(v.state || '');
+    const port  = escHtml(v.port_name || v.port_locode || '');
+    const dest  = v.destination ? `→ ${escHtml(v.destination)}` : '';
+    const afr   = v._africa ? `<span style="color:#ff9800;font-size:10px">🌍 Africa</span>` : '';
+    const scoreBar = Math.round(s * 100);
+    return `<div class="vessel-card" style="padding:8px 10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="font-size:12px;font-weight:600;color:var(--text1)">${name}</div>
+        <button class="btn-secondary" style="font-size:10px;padding:2px 7px;line-height:1.4" onclick="startFleetVoyagePlan(${JSON.stringify({ mmsi: v.mmsi, name: v.name, lat: v.lat, lon: v.lon, port: v.port_name }).replace(/"/g,'&quot;')})">Plan Voyage</button>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:2px">${type} · ${state} · ${port} ${dest}</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px">${afr}
+        <div style="flex:1;height:3px;background:var(--border);border-radius:2px">
+          <div style="width:${scoreBar}%;height:100%;background:${dot};border-radius:2px"></div>
+        </div>
+        <span style="font-size:10px;color:${dot}">${v._avail.label}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderFleetPortsOnMap() {
+  fleetPortMarkers.clearLayers();
+  (fleetData?.ports || []).forEach(p => {
+    if (!p.lat || !p.lon) return;
+    const col = p.congestion_score > 60 ? '#ff9800' : p.congestion_score > 40 ? '#ffeb3b' : '#4caf50';
+    const c = L.circleMarker([p.lat, p.lon], {
+      radius: 14, color: col, weight: 2, opacity: 0.9,
+      fillColor: col, fillOpacity: 0.15,
+    });
+    c.bindTooltip(`<strong>${escHtml(p.name)}</strong><br>${p.total_vessels} vessels · Score ${p.congestion_score}`, { className: 'port-tooltip' });
+    fleetPortMarkers.addLayer(c);
+  });
+}
+
+function renderFleetVesselsOnMap() {
+  fleetVesselMarkers.clearLayers();
+  fleetFilteredVessels.forEach(v => {
+    if (v.lat == null || v.lon == null) return;
+    const s = v._avail.score;
+    const col = s >= 0.6 ? '#4caf50' : s >= 0.3 ? '#ff9800' : '#8b949e';
+    const m = L.circleMarker([v.lat, v.lon], {
+      radius: 4, color: '#fff', weight: 1, fillColor: col, fillOpacity: 0.85,
+    });
+    m.bindTooltip(
+      `<strong>${escHtml(v.name || String(v.mmsi))}</strong><br>` +
+      `${escHtml(v.type_specific || '')} · ${v.speed || 0} kts<br>` +
+      (v.destination ? `→ ${escHtml(v.destination)}` : 'No destination'),
+      { sticky: true, className: 'port-tooltip' }
+    );
+    m.on('click', () => loadVesselDetail(v.mmsi));
+    fleetVesselMarkers.addLayer(m);
+  });
+}
+
+function startFleetVoyagePlan(vessel) {
+  fleetVoyageOrigin = vessel;
+  const voyageEl = $('fleet-voyage');
+  const originEl = $('fleet-voyage-origin');
+  if (voyageEl) voyageEl.classList.remove('hidden');
+  if (originEl) originEl.textContent = `From: ${vessel.name || vessel.mmsi} · ${vessel.port || ''}`;
+  const destInput = $('fleet-voyage-dest');
+  const destDD    = $('fleet-voyage-dropdown');
+  if (destInput && destDD) {
+    createPortAutocomplete(destInput, destDD, port => {
+      destInput.value = `${port.name} (${port.locode})`;
+      destInput._selectedPort = port;
+    });
+  }
+  const calcBtn = $('fleet-voyage-calc');
+  if (calcBtn) {
+    // Replace onclick to avoid stacking duplicate listeners
+    calcBtn.onclick = calculateFleetVoyage;
+  }
+  voyageEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function calculateFleetVoyage() {
+  let dest = $('fleet-voyage-dest')?._selectedPort;
+  // Fallback: look up port by typed name if _selectedPort not set via dropdown click
+  if (!dest) {
+    const val = ($('fleet-voyage-dest')?.value || '').trim();
+    if (val) {
+      try {
+        const r = await fetch(`/api/ports/search?q=${encodeURIComponent(val)}&limit=1`);
+        const ps = await r.json();
+        if (ps.length) dest = ps[0];
+      } catch { /* ignore */ }
+    }
+  }
+  const origin = fleetVoyageOrigin;
+  if (!origin?.lat || !origin?.lon || !dest?.lat || !dest?.lon) {
+    $('fleet-voyage-result').innerHTML = '<div style="color:#ef5350;font-size:11px;padding:6px">Select a valid destination port</div>';
+    return;
+  }
+  $('fleet-voyage-result').innerHTML = '<div class="cc-loading-sm"><div class="spinner"></div> Calculating…</div>';
+  try {
+    const res = await fetch('/api/route/multi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        waypoints: [
+          { lat: origin.lat, lon: origin.lon, name: origin.name || 'Vessel' },
+          { lat: dest.lat, lon: dest.lon, name: dest.name },
+        ],
+        speed_knots: 12,
+      }),
+    });
+    const route = await res.json();
+    if (!route || route.error) throw new Error(route?.error || 'Route failed');
+    const totalNmi = route.legs.reduce((s, l) => s + (l.distance_nmi || 0), 0);
+    const etaH = Math.round(totalNmi / 12);
+    $('fleet-voyage-result').innerHTML = `
+      <div style="padding:8px;background:var(--card-bg);border-radius:6px;margin-top:6px;font-size:12px">
+        <div style="font-weight:600;margin-bottom:4px">${escHtml(origin.name||'Vessel')} → ${escHtml(dest.name)}</div>
+        <div style="color:var(--text2)">${Math.round(totalNmi)} nmi · ETA ${formatDuration(etaH)}</div>
+      </div>`;
+    renderFleetRouteOnMap(route, origin, dest);
+  } catch (e) {
+    $('fleet-voyage-result').innerHTML = `<div style="color:#ef5350;font-size:11px;padding:6px">${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderFleetRouteOnMap(route, origin, dest) {
+  if (fleetRouteLayer) { fleetRouteLayer.remove(); fleetRouteLayer = null; }
+  const group = L.featureGroup();
+  route.legs.forEach(leg => {
+    L.geoJSON(leg.route, { style: { color: '#2196f3', weight: 3, opacity: 0.85 } }).addTo(group);
+  });
+  L.circleMarker([origin.lat, origin.lon], { radius: 8, color: '#4caf50', fillColor: '#4caf50', fillOpacity: 0.9, weight: 2 })
+    .bindTooltip(escHtml(origin.name || 'Vessel'), { className: 'port-tooltip' }).addTo(group);
+  L.circleMarker([dest.lat, dest.lon], { radius: 8, color: '#ef5350', fillColor: '#ef5350', fillOpacity: 0.9, weight: 2 })
+    .bindTooltip(escHtml(dest.name), { className: 'port-tooltip' }).addTo(group);
+  group.addTo(map);
+  fleetRouteLayer = group;
+  map.fitBounds(group.getBounds(), { padding: [40, 40] });
+}
+
+// Wire up fleet filter listeners (run once after DOM ready)
+(function initFleetDashboard() {
+  ['fleet-filter-type','fleet-filter-port','fleet-filter-state'].forEach(id => {
+    $(id)?.addEventListener('change', applyFleetFilters);
+  });
+  $('fleet-filter-dest')?.addEventListener('input', applyFleetFilters);
+  $('fleet-filter-available')?.addEventListener('change', applyFleetFilters);
+  $('fleet-filter-africa')?.addEventListener('change', applyFleetFilters);
+  $('fleet-arrivals-toggle')?.addEventListener('click', () => {
+    const el = $('fleet-arrivals-list');
+    if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+  });
+})();
+
+// fetchCCPortQuickIntel removed — replaced by Fleet Dashboard
+
+// calculateCommandCenter, showCCError, hideCCError, renderCCRoute removed — replaced by Fleet Dashboard
+
+// ── (legacy CC render stubs — kept to avoid ReferenceErrors) ─────────────
 function renderCCRoute(data, speed, fuelCons) {
-  const el = $('cc-route-summary'); el.classList.remove('hidden');
+  const el = $('cc-route-summary'); if (!el) return; el.classList.remove('hidden');
   const t = data.totals;
   const days = t.duration_hours / 24;
   const fuelMT = Math.round(days * fuelCons);
