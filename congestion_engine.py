@@ -82,7 +82,7 @@ MONITORED_PORTS = {
         "max_queue": 20,
     },
     "MGTNR": {
-        "name": "Toamasina",
+        "name": "Toamasina (Tamatave)",
         "country": "Madagascar",
         "lat": -18.15,
         "lon": 49.40,

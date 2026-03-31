@@ -154,8 +154,8 @@ PORTS = [
     {"id": "zacpe", "name": "Port Elizabeth", "country": "South Africa", "locode": "ZAPLZ", "lat": -33.96, "lon": 25.63},
     {"id": "muplu", "name": "Port Louis", "country": "Mauritius", "locode": "MUPLU", "lat": -20.16, "lon": 57.50},
     {"id": "rereo", "name": "Reunion", "country": "France", "locode": "REREO", "lat": -20.93, "lon": 55.47},
-    {"id": "mgtnr", "name": "Toamasina", "country": "Madagascar", "locode": "MGTNR", "lat": -18.15, "lon": 49.40},
-    {"id": "mgtle", "name": "Toliara (Tulear)", "country": "Madagascar", "locode": "MGTLE", "lat": -23.35, "lon": 43.67},
+    {"id": "mgtnr", "name": "Toamasina (Tamatave)", "country": "Madagascar", "locode": "MGTNR", "lat": -18.15, "lon": 49.40},
+    {"id": "mgtle", "name": "Toliara (Tulear/Tullear)", "country": "Madagascar", "locode": "MGTLE", "lat": -23.35, "lon": 43.67},
     {"id": "ytmam", "name": "Mayotte", "country": "France", "locode": "YTMAM", "lat": -12.78, "lon": 45.23},
     {"id": "scpov", "name": "Victoria (Seychelles)", "country": "Seychelles", "locode": "SCPOV", "lat": -4.62, "lon": 55.46},
 ]
