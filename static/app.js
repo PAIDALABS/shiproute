@@ -1966,11 +1966,24 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Market Intel Mode ────────────────────────────────────────────────────────
-let _marketGlobalData = null; // cached for filter
+let _marketGlobalData  = null;  // cached global port data
+let _marketOverview    = null;  // cached 12-port overview
+let _marketCorridor    = null;  // cached corridor
+let _marketFetchedAt   = 0;     // epoch ms of last full fetch
+const MARKET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-async function loadMarketData() {
+async function loadMarketData(force = false) {
   const loading = document.getElementById('market-loading');
   const content = document.getElementById('market-content');
+
+  // Use cached data if fresh enough
+  const age = Date.now() - _marketFetchedAt;
+  if (!force && _marketGlobalData && age < MARKET_CACHE_TTL) {
+    loading.classList.add('hidden');
+    renderMarketIntel(_marketOverview, _marketCorridor, _marketGlobalData);
+    return;
+  }
+
   loading.classList.remove('hidden');
   loading.textContent = 'Loading market intelligence...';
   content.innerHTML = '';
@@ -1982,12 +1995,13 @@ async function loadMarketData() {
       fetch('/api/market/global?top=150'),
     ]);
 
-    const overview = overviewRes.ok ? await overviewRes.json() : null;
-    const corridor = corridorRes.ok ? await corridorRes.json() : null;
-    _marketGlobalData = globalRes.ok ? await globalRes.json() : null;
+    _marketOverview   = overviewRes.ok  ? await overviewRes.json()  : null;
+    _marketCorridor   = corridorRes.ok  ? await corridorRes.json()  : null;
+    _marketGlobalData = globalRes.ok    ? await globalRes.json()    : null;
+    _marketFetchedAt  = Date.now();
 
     loading.classList.add('hidden');
-    renderMarketIntel(overview, corridor, _marketGlobalData);
+    renderMarketIntel(_marketOverview, _marketCorridor, _marketGlobalData);
   } catch (err) {
     loading.textContent = `Error: ${err.message}`;
   }
@@ -2009,10 +2023,13 @@ function renderMarketIntel(overview, corridor, globalData) {
   // ── Global fleet summary (top of page) ───────────────────────────────────
   if (globalData) {
     const s = globalData.summary;
-    const pct = s.vessels_with_position > 0
-      ? Math.round((s.vessels_with_destination / s.vessels_with_position) * 100) : 0;
+    const ageMin = _marketFetchedAt ? Math.round((Date.now() - _marketFetchedAt) / 60000) : 0;
+    const ageStr = ageMin === 0 ? 'just now' : `${ageMin}m ago`;
     html += `<div class="intel-section">
-      <div class="intel-section-title">Global Fleet</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div class="intel-section-title">Global Fleet</div>
+        <span style="font-size:10px;color:var(--text3)">Updated ${ageStr} <button class="sort-btn" style="font-size:9px;padding:2px 6px;margin-left:4px" onclick="loadMarketData(true)">↻ Refresh</button></span>
+      </div>
       <div class="intel-grid">
         <div class="intel-card"><div class="intel-val">${(s.total_in_database||0).toLocaleString()}</div><div class="intel-label">Vessels in DB</div></div>
         <div class="intel-card"><div class="intel-val">${(s.vessels_with_position||0).toLocaleString()}</div><div class="intel-label">With Position</div></div>
