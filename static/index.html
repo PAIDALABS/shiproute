@@ -12,132 +12,382 @@
 </head>
 <body>
 
+  <!-- ── Top Navigation Bar ───────────────────────────────────────────────── -->
+  <nav id="top-nav">
+    <div id="nav-brand">
+      <span class="brand-icon">⚓</span>
+      <span class="nav-brand-title">ShipRoute</span>
+    </div>
+    <div id="mode-toggle">
+      <button class="mode-btn mode-btn-primary" id="btn-command-mode" onclick="switchMode('command')">Fleet Dashboard</button>
+      <button class="mode-btn" id="btn-voyage-mode" onclick="switchMode('voyage')">Voyage</button>
+      <button class="mode-btn active" id="btn-portwatch-mode" onclick="switchMode('portwatch')">Port Watch</button>
+      <button class="mode-btn" id="btn-finder-mode" onclick="switchMode('finder')">Vessel Finder</button>
+      <button class="mode-btn" id="btn-weather-mode" onclick="switchMode('weather')">Weather</button>
+      <button class="mode-btn" id="btn-market-mode" onclick="switchMode('market')">Market Intel</button>
+    </div>
+  </nav>
+
   <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
   <aside id="sidebar">
-    <div id="brand">
-      <span class="brand-icon">⚓</span>
-      <div>
-        <div class="brand-title">ShipRoute</div>
-        <div class="brand-sub">Maritime Route Planner</div>
-      </div>
-    </div>
 
-    <!-- Origin -->
-    <div class="waypoint-block" id="origin-block">
-      <div class="waypoint-label">
-        <span class="dot dot-origin"></span>
-        Origin
-      </div>
-      <div class="tab-bar">
-        <button class="tab-btn active" data-wp="origin" data-tab="port">Port Search</button>
-        <button class="tab-btn" data-wp="origin" data-tab="coords">Coordinates</button>
+    <!-- ── Voyage Mode ───────────────────────────────────────────────── -->
+    <div id="voyage-mode" class="hidden">
+      <div id="brand">
+        <div>
+          <div class="brand-title">Voyage Planner</div>
+          <div class="brand-sub">Multi-leg route & cost calculator</div>
+        </div>
       </div>
 
-      <!-- Port search pane -->
-      <div class="tab-pane active" id="origin-port">
+      <!-- Onboarding empty state -->
+      <div id="voyage-onboard" class="onboard-box">
+        <div class="onboard-title">Plan a Voyage</div>
+        <div class="onboard-subtitle">Enter ports or try an example:</div>
+        <div class="onboard-examples">
+          <button class="onboard-btn" data-from="INKAN" data-to="KEMBA">Kandla &rarr; Mombasa</button>
+          <button class="onboard-btn" data-from="INMUN" data-to="TZDAR">Mundra &rarr; Dar es Salaam</button>
+          <button class="onboard-btn" data-from="NLRTM" data-to="DEHAM">Rotterdam &rarr; Hamburg</button>
+        </div>
+      </div>
+
+      <!-- Waypoints list -->
+      <div id="waypoints-container">
+        <div class="waypoint-block" data-wp-idx="0">
+          <div class="waypoint-label"><span class="dot dot-origin"></span> Port 1</div>
+          <div class="autocomplete-wrap">
+            <input class="inp wp-search" type="text" placeholder="Search port..." autocomplete="off" data-idx="0" />
+            <div class="dropdown wp-dropdown"></div>
+          </div>
+        </div>
+        <div class="waypoint-block" data-wp-idx="1">
+          <div class="waypoint-label"><span class="dot dot-dest"></span> Port 2</div>
+          <div class="autocomplete-wrap">
+            <input class="inp wp-search" type="text" placeholder="Search port..." autocomplete="off" data-idx="1" />
+            <div class="dropdown wp-dropdown"></div>
+          </div>
+        </div>
+      </div>
+      <button id="add-wp-btn" class="btn-secondary">+ Add Stop</button>
+
+      <!-- Speed & Fuel -->
+      <div id="speed-block">
+        <label class="speed-label">Vessel Speed</label>
+        <div class="speed-row">
+          <input class="inp speed-inp" type="number" id="speed-input" value="14" min="1" max="50" step="0.5" />
+          <span class="speed-unit">knots</span>
+          <select class="inp speed-preset" id="speed-preset">
+            <option value="">Presets...</option>
+            <option value="10">Slow steam (10)</option>
+            <option value="12">Eco (12)</option>
+            <option value="14">Standard (14)</option>
+            <option value="18">Fast cargo (18)</option>
+            <option value="22">Container (22)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="fuel-block">
+        <label class="speed-label">Fuel Estimation</label>
+        <div class="speed-row">
+          <input class="inp speed-inp" type="number" id="fuel-consumption" value="22" min="1" max="200" step="1" />
+          <span class="speed-unit">MT/day</span>
+          <select class="inp speed-preset" id="fuel-preset">
+            <option value="">Vessel class...</option>
+            <option value="15">Handysize (15)</option>
+            <option value="22">Supramax (22)</option>
+            <option value="32">Panamax (32)</option>
+            <option value="55">Container (55)</option>
+          </select>
+        </div>
+        <div class="speed-row" style="margin-top:4px">
+          <input class="inp speed-inp" type="number" id="fuel-price" value="600" min="1" max="2000" step="10" />
+          <span class="speed-unit">$/MT</span>
+        </div>
+      </div>
+
+      <button id="calc-btn">Calculate Voyage</button>
+      <div id="error-box" class="hidden" role="alert"></div>
+
+      <!-- Voyage Results -->
+      <div id="voyage-results" class="hidden">
+        <div id="voyage-summary"></div>
+        <div id="voyage-legs"></div>
+        <div id="voyage-fuel"></div>
+        <div id="voyage-congestion"></div>
+      </div>
+
+      <div id="loading" class="hidden"><div class="spinner"></div>Calculating...</div>
+    </div><!-- /#voyage-mode -->
+
+    <!-- ── Port Watch Mode ────────────────────────────────────────────── -->
+    <div id="portwatch-mode">
+      <div><div class="brand-title">Port Watch</div><div class="brand-sub">Live congestion & cargo flow</div></div>
+      <div id="live-status-bar">
+        <span id="live-status-dot" class="live-dot"></span>
+        <span id="live-status-text">Connecting...</span>
+        <span id="live-last-update" class="live-last-update"></span>
+      </div>
+      <div id="congestion-legend-live">
+        <span class="legend-item"><span class="legend-dot severity-severe"></span>Severe</span>
+        <span class="legend-item"><span class="legend-dot severity-high"></span>High</span>
+        <span class="legend-item"><span class="legend-dot severity-moderate"></span>Moderate</span>
+        <span class="legend-item"><span class="legend-dot severity-low"></span>Low</span>
+      </div>
+      <div class="port-sort-bar" style="display:flex;gap:6px;padding:0 12px 8px;flex-wrap:wrap">
+        <button class="sort-btn active" data-sort="score">Score</button>
+        <button class="sort-btn" data-sort="wait">Wait</button>
+        <button class="sort-btn" data-sort="vessels">Vessels</button>
+        <button class="sort-btn" data-sort="name">Name</button>
+      </div>
+      <div id="live-port-list" aria-live="polite"></div>
+    </div><!-- /#portwatch-mode -->
+
+    <!-- ── Vessel Finder Mode ─────────────────────────────────────────── -->
+    <div id="finder-mode" class="hidden">
+      <div><div class="brand-title">Vessel Finder</div><div class="brand-sub">Find ships to hire</div></div>
+
+      <div class="waypoint-block">
+        <div class="waypoint-label"><span class="dot dot-origin"></span> Search Near Port</div>
         <div class="autocomplete-wrap">
-          <input class="inp" type="text" id="origin-search"
-                 placeholder="Port name or LOCODE…" autocomplete="off" />
-          <div class="dropdown" id="origin-dropdown"></div>
-        </div>
-        <div class="selected-port" id="origin-selected"></div>
-      </div>
-
-      <!-- Coordinates pane -->
-      <div class="tab-pane" id="origin-coords">
-        <div class="coords-row">
-          <input class="inp coords-inp" type="number" id="origin-lat"
-                 placeholder="Latitude" step="any" />
-          <input class="inp coords-inp" type="number" id="origin-lon"
-                 placeholder="Longitude" step="any" />
+          <input class="inp" type="text" id="finder-port-search" placeholder="Port name or LOCODE..." autocomplete="off" aria-label="Search ports" />
+          <div class="dropdown" id="finder-port-dropdown"></div>
         </div>
       </div>
-    </div>
 
-    <!-- Destination -->
-    <div class="waypoint-block" id="destination-block">
-      <div class="waypoint-label">
-        <span class="dot dot-dest"></span>
-        Destination
-      </div>
-      <div class="tab-bar">
-        <button class="tab-btn active" data-wp="destination" data-tab="port">Port Search</button>
-        <button class="tab-btn" data-wp="destination" data-tab="coords">Coordinates</button>
-      </div>
-
-      <!-- Port search pane -->
-      <div class="tab-pane active" id="destination-port">
-        <div class="autocomplete-wrap">
-          <input class="inp" type="text" id="destination-search"
-                 placeholder="Port name or LOCODE…" autocomplete="off" />
-          <div class="dropdown" id="destination-dropdown"></div>
-        </div>
-        <div class="selected-port" id="destination-selected"></div>
-      </div>
-
-      <!-- Coordinates pane -->
-      <div class="tab-pane" id="destination-coords">
-        <div class="coords-row">
-          <input class="inp coords-inp" type="number" id="destination-lat"
-                 placeholder="Latitude" step="any" />
-          <input class="inp coords-inp" type="number" id="destination-lon"
-                 placeholder="Longitude" step="any" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Speed selector -->
-    <div id="speed-block">
-      <label class="speed-label" for="speed-select">Vessel Speed</label>
-      <div class="speed-row">
-        <input class="inp speed-inp" type="number" id="speed-input"
-               value="14" min="1" max="50" step="0.5" />
-        <span class="speed-unit">knots</span>
-        <select class="inp speed-preset" id="speed-preset">
-          <option value="">Presets…</option>
-          <option value="10">Slow steam (10 kn)</option>
-          <option value="12">Eco steam (12 kn)</option>
-          <option value="14">Standard (14 kn)</option>
-          <option value="18">Fast cargo (18 kn)</option>
-          <option value="22">Container fast (22 kn)</option>
-          <option value="28">High-speed (28 kn)</option>
+      <div id="finder-filters">
+        <select class="inp" id="finder-type-filter">
+          <option value="">All vessel types</option>
+          <option value="Cargo">Cargo</option>
+          <option value="Bulk">Bulk Carrier</option>
+          <option value="Tanker">Tanker</option>
+          <option value="Container">Container</option>
+          <option value="General">General Cargo</option>
         </select>
+        <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;margin-top:4px">
+          <input type="checkbox" id="finder-idle-only" /> Idle only
+        </label>
+        <label style="font-size:12px;color:#ff9800;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="finder-africa-only" /> Africa trade only
+        </label>
+      </div>
+
+      <button id="finder-search-btn">Search Vessels</button>
+      <div id="finder-loading" class="hidden" role="status" aria-live="polite"><div class="spinner"></div>Searching...</div>
+      <div id="finder-results"></div>
+    </div><!-- /#finder-mode -->
+
+    <!-- ── Weather Mode ────────────────────────────────────────────────── -->
+    <div id="weather-mode" class="hidden">
+      <div><div class="brand-title">Weather & Risk</div><div class="brand-sub">Marine forecasts & route safety</div></div>
+
+      <div class="waypoint-block">
+        <div class="waypoint-label"><span class="dot dot-origin"></span> Port Weather</div>
+        <div class="autocomplete-wrap">
+          <input class="inp" type="text" id="weather-port-search" placeholder="Search port..." autocomplete="off" aria-label="Search ports" />
+          <div class="dropdown" id="weather-port-dropdown"></div>
+        </div>
+      </div>
+      <button id="weather-port-btn" class="btn-secondary">Get Port Weather</button>
+
+      <div id="weather-port-result"></div>
+
+      <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
+        <div class="waypoint-label">Route Weather</div>
+        <div style="font-size:11px;color:var(--text2)">Calculate a voyage first, then click below to check weather along it.</div>
+        <button id="weather-route-btn" class="btn-secondary" style="margin-top:6px">Check Route Weather</button>
+      </div>
+
+      <div id="weather-route-result"></div>
+    </div><!-- /#weather-mode -->
+
+    <!-- ── Market Intel Mode ────────────────────────────────────────── -->
+    <div id="market-mode" class="hidden">
+      <div><div class="brand-title">Market Intel</div><div class="brand-sub">Global fleet · all ports · live destinations</div></div>
+      <!-- Port monitoring groups bar -->
+      <div id="pg-bar" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:6px 0 2px"></div>
+      <input id="market-port-search" class="inp" type="text" placeholder="Filter ports by name or country..." style="margin:4px 0;width:100%;box-sizing:border-box" aria-label="Filter ports">
+      <div id="market-loading" class="vessel-empty">Loading market data...</div>
+      <div id="market-content"></div>
+    </div><!-- /#market-mode -->
+
+    <div id="command-mode" class="mode-panel hidden">
+      <div><div class="brand-title">Fleet Dashboard</div><div class="brand-sub">Live tracking across all ports</div></div>
+
+      <!-- Fleet Stats -->
+      <div id="fleet-stats" class="intel-grid">
+        <div class="intel-card"><div class="intel-val" id="fleet-total">—</div><div class="intel-label">Total</div></div>
+        <div class="intel-card"><div class="intel-val" id="fleet-anchored">—</div><div class="intel-label">Anchored</div></div>
+        <div class="intel-card"><div class="intel-val" id="fleet-berthed">—</div><div class="intel-label">Berthed</div></div>
+        <div class="intel-card"><div class="intel-val" id="fleet-moving">—</div><div class="intel-label">Moving</div></div>
+      </div>
+
+      <!-- Port Arrivals -->
+      <div class="cc-section-header" style="cursor:pointer" id="fleet-arrivals-toggle">
+        <span>Inbound Arrivals</span>
+        <span id="fleet-arrivals-count" class="cc-count-badge">0</span>
+      </div>
+      <div id="fleet-arrivals-list" style="max-height:160px;overflow-y:auto"></div>
+
+      <!-- Filters -->
+      <div class="cc-section-header">Filters</div>
+      <div class="fleet-filters">
+        <div class="fleet-filter-row">
+          <select id="fleet-filter-type" class="inp" aria-label="Filter by type">
+            <option value="">All Types</option>
+            <option value="Cargo">Cargo</option>
+            <option value="Bulk Carrier">Bulk Carrier</option>
+            <option value="Tanker">Tanker</option>
+            <option value="General Cargo">General Cargo</option>
+            <option value="Multi Purpose">Multi Purpose</option>
+            <option value="Container">Container</option>
+          </select>
+          <select id="fleet-filter-port" class="inp" aria-label="Filter by port">
+            <option value="">All Ports</option>
+          </select>
+        </div>
+        <div class="fleet-filter-row">
+          <select id="fleet-filter-state" class="inp" aria-label="Filter by state">
+            <option value="">All States</option>
+            <option value="ANCHORED">Anchored</option>
+            <option value="BERTHED">Berthed</option>
+            <option value="APPROACHING">Approaching</option>
+            <option value="TRANSITING">Transiting</option>
+          </select>
+          <input class="inp" type="text" id="fleet-filter-dest" placeholder="Filter destination..." aria-label="Filter by destination" />
+        </div>
+        <div class="fleet-filter-row">
+          <label style="font-size:11px;display:flex;align-items:center;gap:4px;color:var(--text2)">
+            <input type="checkbox" id="fleet-filter-available" /> Available only
+          </label>
+          <label style="font-size:11px;display:flex;align-items:center;gap:4px;color:#ff9800">
+            <input type="checkbox" id="fleet-filter-africa" /> Africa trade
+          </label>
+        </div>
+      </div>
+
+      <!-- Vessel List -->
+      <div class="cc-section-header">
+        <span>Vessels</span>
+        <span id="fleet-vessel-count" class="cc-count-badge">0</span>
+      </div>
+      <div id="fleet-vessel-list" style="max-height:calc(100vh - 580px);overflow-y:auto"></div>
+
+      <!-- Inline Voyage Planner (hidden until Plan Voyage clicked) -->
+      <div id="fleet-voyage" class="hidden">
+        <div class="cc-section-header">Plan Voyage</div>
+        <div id="fleet-voyage-origin" style="font-size:11px;color:var(--text2);margin-bottom:4px"></div>
+        <div class="autocomplete-wrap">
+          <input class="inp" type="text" id="fleet-voyage-dest" placeholder="Destination port..." aria-label="Voyage destination" autocomplete="off" />
+          <div class="dropdown" id="fleet-voyage-dropdown"></div>
+        </div>
+        <button id="fleet-voyage-calc" class="calc-btn" style="margin-top:6px">Calculate Route</button>
+        <div id="fleet-voyage-result"></div>
       </div>
     </div>
 
-    <button id="calc-btn">Calculate Route</button>
-
-    <!-- Error -->
-    <div id="error-box" class="hidden"></div>
-
-    <!-- Stats -->
-    <div id="stats-panel" class="hidden">
-      <div class="stats-route-label" id="stats-label"></div>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" id="stat-km">—</div>
-          <div class="stat-label">Kilometers</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-nmi">—</div>
-          <div class="stat-label">Nautical Miles</div>
-        </div>
-        <div class="stat-card wide">
-          <div class="stat-value" id="stat-time">—</div>
-          <div class="stat-label">Transit at 14 kn</div>
-        </div>
-      </div>
-    </div>
-
-    <div id="loading" class="hidden">
-      <div class="spinner"></div>
-      Calculating route…
-    </div>
   </aside>
 
   <!-- ── Map ─────────────────────────────────────────────────────────────── -->
   <div id="map"></div>
   <div id="cursor-pos">—</div>
+
+  <!-- ── Port Detail Panel (slides in from right) ─────────────────────── -->
+  <div id="port-detail" class="hidden">
+    <div class="port-detail-header">
+      <div class="port-detail-title-group">
+        <div id="pd-port-name" class="pd-port-name"></div>
+        <div id="pd-port-meta" class="pd-port-meta"></div>
+      </div>
+      <button id="pd-close-btn" class="pd-close-btn" onclick="closePortDetail()">✕</button>
+    </div>
+
+    <!-- Score ring + level -->
+    <div class="pd-score-row" id="pd-score-row" role="status" aria-label="Congestion score">
+      <div class="pd-score-ring-wrap">
+        <svg class="pd-score-ring" viewBox="0 0 80 80">
+          <circle class="ring-track" cx="40" cy="40" r="32" />
+          <circle class="ring-fill" id="pd-ring-fill" cx="40" cy="40" r="32"
+                  stroke-dasharray="201 201" stroke-dashoffset="201" />
+        </svg>
+        <div class="pd-score-center">
+          <div id="pd-score-val" class="pd-score-val">—</div>
+          <div class="pd-score-sub">/ 100</div>
+        </div>
+      </div>
+      <div class="pd-level-group">
+        <div id="pd-level-badge" class="pd-level-badge">—</div>
+        <div class="pd-level-label">Congestion Level</div>
+      </div>
+    </div>
+
+    <!-- Metrics grid -->
+    <div class="pd-metrics-grid">
+      <div class="pd-metric-card">
+        <div id="pd-peak-anchored" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Peak Queue</div>
+      </div>
+      <div class="pd-metric-card">
+        <div id="pd-avg-wait" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Avg Wait</div>
+      </div>
+      <div class="pd-metric-card">
+        <div id="pd-peak-berthed" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Peak Berthed</div>
+      </div>
+      <div class="pd-metric-card">
+        <div id="pd-transitioned" class="pd-metric-val">—</div>
+        <div class="pd-metric-label">Transitioned</div>
+      </div>
+    </div>
+
+    <!-- Timeline chart -->
+    <div class="pd-section-title">Anchor Queue Over Time</div>
+    <div class="timeline-chart" id="pd-timeline-chart">
+      <div class="timeline-loading">Loading chart…</div>
+    </div>
+
+    <!-- Port Intelligence -->
+    <div class="pd-section-title">Port Intelligence</div>
+    <div id="pd-intelligence" class="pd-intelligence"></div>
+
+    <!-- State breakdown bars -->
+    <div class="pd-section-title">State Breakdown</div>
+    <div id="pd-state-breakdown" class="pd-state-breakdown"></div>
+
+    <!-- Vessel list -->
+    <div class="pd-section-title">Vessels in Port Zone</div>
+    <div id="pd-vessel-list" class="vessel-list"></div>
+
+  </div><!-- /#port-detail -->
+
+  <!-- Port Groups Modal -->
+  <div id="pg-modal" class="hidden">
+    <div id="pg-modal-inner">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">Create Port Group</div>
+        <button id="pg-modal-close" style="background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:0 4px" aria-label="Close">✕</button>
+      </div>
+      <input id="pg-name-inp" class="inp" type="text" placeholder="Group name (e.g. East Africa)" maxlength="40" aria-label="Group name">
+      <div style="font-size:11px;color:var(--text2);margin:2px 0 4px">Add ports by:</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+        <select id="pg-continent-sel" class="inp" style="flex:1;min-width:100px;padding:4px 6px;font-size:11px" aria-label="Add by continent">
+          <option value="">Continent…</option>
+        </select>
+        <select id="pg-country-sel" class="inp" style="flex:1;min-width:100px;padding:4px 6px;font-size:11px" aria-label="Add by country">
+          <option value="">Country…</option>
+        </select>
+      </div>
+      <input id="pg-port-search-inp" class="inp" type="text" placeholder="Search port by name or LOCODE…" style="font-size:11px;margin-bottom:6px" aria-label="Search individual port">
+      <div id="pg-port-search-results" style="max-height:80px;overflow-y:auto;margin-bottom:6px"></div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Selected: <span id="pg-count">0</span> ports</div>
+      <div id="pg-draft-list" style="max-height:120px;overflow-y:auto;margin-bottom:8px;border:1px solid var(--border);border-radius:4px;padding:4px"></div>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button id="pg-cancel-btn" class="sort-btn" style="font-size:11px">Cancel</button>
+        <button id="pg-save-btn" class="sort-btn" style="font-size:11px;background:var(--accent);color:#fff">Save Group</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
